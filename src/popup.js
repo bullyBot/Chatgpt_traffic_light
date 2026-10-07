@@ -22,7 +22,7 @@ async function refresh() {
     const error = [state.connectionError, state.notificationError].filter(Boolean).join('；');
     $('error').hidden = !error;
     $('error').textContent = error;
-    $('diagnostics').textContent = JSON.stringify({ connection: state.connectionError || '已连接', pages: state.tasks.map(task => ({ state: task.status, signals: task.diagnostics })) }, null, 2);
+    $('diagnostics').textContent = JSON.stringify({ version: state.version, connection: state.connectionError || '已连接', pages: state.tasks.map(task => ({ state: task.status, signals: task.diagnostics })) }, null, 2);
     const fragment = document.createDocumentFragment();
     for (const task of state.tasks.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))) {
       const button = element('button', `task ${task.status}`, '');

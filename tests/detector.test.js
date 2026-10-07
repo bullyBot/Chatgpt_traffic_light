@@ -96,3 +96,49 @@ test('/local/ keeps existing completed markers in its baseline while another tas
   assert.equal(active.completionKey, after.completionKey);
   assert.ok(active.completionKey);
 });
+test('twelve status nodes with a visible 正在思考 label are running without a Stop button', () => {
+  const empty = '<div role="status" aria-live="polite"></div>'.repeat(11);
+  const result = scan(empty + '<div role="status" aria-live="polite">正在思考</div>', '/local/');
+  assert.equal(result.state, 'running');
+  assert.equal(result.diagnostics.statusMarkers, 12);
+  assert.equal(result.diagnostics.stopControls, 0);
+  assert.equal(result.diagnostics.markerSamples.filter(sample => sample.recognized === 'running').length, 1);
+});
+test('ongoing thinking labels support ellipses, timers and accessible-label-only status', () => {
+  for (const value of ['正在思考…', '正在思考...', '正在思考 · 12秒', 'Working… 1m 23s', 'Thinking...']) {
+    assert.equal(scan(`<span data-testid="task-status">${value}</span>`, '/local/').state, 'running', value);
+  }
+  assert.equal(scan('<div role="status" aria-live="polite" aria-label="正在思考"></div>', '/local/').state, 'running');
+  assert.equal(scan('<button aria-expanded="true">正在思考…</button>', '/local/').state, 'running');
+  assert.equal(scan('<header><span>正在思考…</span></header>', '/local/').state, 'running');
+});
+test('old thinking summaries, prose and loading indicators cannot imply running or completion', () => {
+  for (const value of ['已思考 12 秒', '思考了 12 秒', 'Loading...', 'Completed 2 of 5 steps', '正在思考如何完成这个任务']) {
+    assert.equal(scan(`<div role="status" aria-live="polite">${value}</div>`, '/local/').state, 'unknown', value);
+  }
+  assert.equal(scan('<p>正在思考</p>', '/local/').state, 'unknown');
+  assert.equal(scan('<div role="log"><div role="status" aria-live="polite">正在思考</div></div>', '/local/').state, 'unknown');
+  assert.equal(scan('<div data-message-author-role="assistant"><button aria-expanded="true">正在思考</button></div>', '/local/').state, 'unknown');
+  assert.equal(scan('<div class="markdown"><span>正在思考</span></div>', '/local/').state, 'unknown');
+  assert.equal(scan('<nav><span>正在思考</span></nav>', '/local/').state, 'unknown');
+  assert.equal(scan('<span>已思考 12 秒</span>', '/local/').state, 'unknown');
+});
+test('screen reader announcements and generic completion toasts are not task completion', () => {
+  const result = scan('<div role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden">Completed</div>', '/local/');
+  assert.equal(result.state, 'unknown');
+  assert.equal(result.diagnostics.rawStatusMarkers, 1);
+  assert.equal(result.diagnostics.ignoredStatusMarkers, 1);
+  assert.equal(scan('<div role="status" aria-live="polite">Completed</div>', '/local/').state, 'unknown');
+});
+test('explicit streaming attributes are running while quoted streaming samples are ignored', () => {
+  assert.equal(scan('<div data-message-author-role="assistant" data-is-streaming="true">partial result</div>').state, 'running');
+  assert.equal(scan('<pre><div data-message-author-role="assistant" data-is-streaming="true">sample</div></pre>').state, 'unknown');
+});
+test('expanded marker diagnostics do not contain raw text, labels, task IDs or credentials', () => {
+  const result = scan('<div data-task-id="private-task-id" role="status" aria-live="polite" aria-label="secret-value">private output secret-value</div>', '/local/');
+  const output = JSON.stringify(result.diagnostics);
+  assert.equal(output.includes('secret-value'), false);
+  assert.equal(output.includes('private output'), false);
+  assert.equal(output.includes('private-task-id'), false);
+  assert.equal(result.diagnostics.markerSamples[0].recognized, 'unrecognized');
+});

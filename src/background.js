@@ -142,7 +142,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const { notificationsEnabled = true } = await chrome.storage.local.get('notificationsEnabled');
       const { connectionError = '' } = await chrome.storage.session.get('connectionError');
       const tasks = Object.values(data.records).map(task => displayedTask(task, Date.now()));
-      return { tasks, status: aggregate(tasks), notificationsEnabled, notificationError: data.notificationError, connectionError };
+      return { tasks, status: aggregate(tasks), notificationsEnabled, notificationError: data.notificationError, connectionError, version: chrome.runtime.getManifest?.().version || 'development' };
     }).then(respond, () => respond({ error: true }));
     return true;
   }

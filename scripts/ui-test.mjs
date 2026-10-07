@@ -230,5 +230,15 @@ try {
   await waitFor(async () => (await notices()).length === 4, 'local green notification');
   assert.deepEqual(errors, []);
   console.log('PASS /local/ running → approval → resumed → confirmed completion notifications');
+  await local.page.locator('main').evaluate(main => { main.innerHTML = '<div role="status" aria-live="polite"></div>'.repeat(11) + '<div role="status" aria-live="polite">正在思考…</div>'; });
+  await waitFor(async () => (await records())[local.tabId]?.status === 'running', 'Chinese thinking badge without stop control');
+  const signals = (await records())[local.tabId].diagnostics;
+  assert.equal(signals.stopControls, 0);
+  assert.equal(signals.rawStatusMarkers, 12);
+  assert.ok(signals.markerSamples.some(sample => sample.recognized === 'running'));
+  await local.page.locator('main').evaluate(main => { main.innerHTML = '<div role="status" aria-live="polite">思考了 12 秒</div><div role="status" aria-live="polite">Completed</div>'; });
+  await waitFor(async () => (await records())[local.tabId]?.status === 'unknown', 'historical thought summary is not complete');
+  assert.equal((await notices()).length, 4);
+  console.log('PASS user-reported 正在思考 with 12 status nodes: red; past summary/toast stay unknown without green');
   console.log('Browser UI/integration harness passed. Chrome APIs were simulated; real MV3 loading and Windows notifications are separate acceptance checks.');
 } finally { await browser.close(); }
