@@ -15,7 +15,7 @@ async function refresh() {
     $('signal').className = `signal ${state.status}`;
     $('summary').textContent = state.tasks.length ? LABELS[state.status] : '等待连接';
     const count = state.tasks.filter(task => task.status === 'attention').length;
-    $('summary-detail').textContent = count ? `${count} 个页面等待你的下一步` : state.tasks.length ? '需要你时，这里会亮起黄灯' : '打开页面，让进度一目了然';
+    $('summary-detail').textContent = count ? `${count} 个页面等待你的下一步` : !state.tasks.length ? '打开页面，让进度一目了然' : state.status === 'unknown' ? '尚未确认页面状态，请查看连接诊断' : '需要你时，这里会亮起黄灯';
     $('count').textContent = `${state.tasks.length} 个页面`;
     $('empty').hidden = Boolean(state.tasks.length);
     $('notifications').checked = state.notificationsEnabled;

@@ -179,3 +179,63 @@ test('final local feedback overrides a stale generic thinking announcement, but 
   assert.equal(scan(localReply + '<div role="status" aria-live="polite">正在思考</div>', '/local/').state, 'completed');
   assert.equal(scan(localReply + '<div data-task-status="running"></div>', '/local/').state, 'running');
 });
+test('a Stop button can override a parent pointer-events:none and still represent execution', () => {
+  const html = '<form style="pointer-events:none"><button aria-label="Stop" style="pointer-events:auto">■</button></form>';
+  for (const path of ['/c/test', '/local/']) {
+    const result = scan(html, path);
+    assert.equal(result.state, 'running');
+    assert.equal(result.diagnostics.stopSamples[0].blockedReason, null);
+  }
+  const blocked = scan('<form><button aria-label="Stop" style="pointer-events:none">■</button></form>');
+  assert.equal(blocked.state, 'unknown');
+  assert.equal(blocked.diagnostics.stopSamples[0].blockedReason, 'pointer-disabled');
+});
+test('reply footers can be siblings of authored messages without an article wrapper', () => {
+  const html = '<section><div data-message-author-role="assistant">结果</div><div><button aria-label="喜欢">赞</button><button aria-label="不喜欢">踩</button></div></section>';
+  for (const path of ['/c/test', '/local/']) {
+    const result = scan(html, path);
+    assert.equal(result.state, 'completed');
+    assert.equal(result.diagnostics.reply.scopedGood, true);
+    assert.equal(result.diagnostics.reply.scopedBad, true);
+  }
+  assert.equal(scan(html + '<section><div data-message-author-role="assistant">新回复</div></section>').state, 'unknown');
+});
+test('nested prose and markdown wrappers form one local reply and find its nearby feedback', () => {
+  const html = '<section><div><div class="prose"><div class="markdown">结果</div></div></div><footer><button title="Thumbs up">赞</button><button title="Thumbs down">踩</button></footer></section>';
+  const result = scan(html, '/local/');
+  assert.equal(result.state, 'completed');
+  assert.equal(result.diagnostics.reply.replyBodies, 1);
+  assert.equal(scan(html + '<section><div class="prose"><div class="markdown">下一轮部分结果</div></div></section>', '/local/').state, 'unknown');
+});
+test('visible ready Send and a custom editor establish idle without claiming completion', () => {
+  const html = '<form><div contenteditable="true" role="textbox"></div><button aria-label="发送消息" disabled>↑</button><button aria-label="Stop" hidden>■</button></form>';
+  for (const path of ['/c/test', '/local/']) {
+    const result = scan(html, path);
+    assert.equal(result.state, 'idle');
+    assert.equal(result.diagnostics.composer.readyEditors, 1);
+    assert.equal(result.completionKey, '');
+    assert.equal(scan(html + '<button data-testid="stop-button">Stop</button>', path).state, 'running');
+    assert.equal(scan(html + '<div role="dialog"><button>Approve</button></div>', path).state, 'attention');
+  }
+});
+test('generic forms, hidden Send buttons and request editors cannot imply idle', () => {
+  for (const html of ['<form><textarea></textarea><button>Search</button></form>', '<form><textarea></textarea><div style="opacity:0"><button aria-label="Send">↑</button></div></form>', '<div role="dialog"><form><textarea></textarea><button aria-label="Send">↑</button></form></div>', '<form data-testid="request-user-input"><textarea></textarea><button aria-label="Send">↑</button></form>']) {
+    assert.notEqual(scan(html, '/local/').state, 'idle');
+  }
+});
+test('reply and composer diagnostics disclose structure without body text or editor content', () => {
+  const result = scan('<section><div class="markdown">PRIVATE_REPLY</div><button aria-label="Good response">PRIVATE_LABEL</button><button aria-label="Bad response">PRIVATE_LABEL</button></section><form><textarea>PRIVATE_INPUT</textarea><button aria-label="Send">↑</button></form>', '/local/');
+  assert.equal(JSON.stringify(result).includes('PRIVATE_'), false);
+  assert.equal(result.diagnostics.reply.bodyFound, true);
+  assert.equal(result.diagnostics.composer.readyEditors, 1);
+});
+test('feedback appearing in another wrapper cannot turn the same old reply into fresh completion evidence', () => {
+  const before = '<section id="turn"><div data-message-author-role="assistant"><div class="markdown">已有结果</div></div><button aria-label="Good response" hidden>赞</button><button aria-label="Bad response" hidden>踩</button></section><button data-testid="stop-button">Stop</button>';
+  const after = before.replaceAll(' hidden', '').replace('<button data-testid="stop-button">Stop</button>', '');
+  assert.equal(scan(before).state, 'running');
+  assert.equal(scan(after).state, 'completed');
+  assert.equal(scan(before).completionKey, scan(after).completionKey);
+  const inside = '<div data-message-author-role="assistant" id="reply">已有结果<button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></div>';
+  assert.equal(scan(inside).completionKey, scan(inside.replace('<button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button>', '')).completionKey);
+  assert.equal(scan('<div data-message-author-role="assistant"><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></div>').state, 'unknown');
+});

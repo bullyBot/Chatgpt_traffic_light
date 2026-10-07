@@ -1,7 +1,7 @@
 import { detect, isStopControl } from './detector.js';
 import { canonicalUrl } from './model.js';
 
-const agentVersion = '0.2.0';
+const agentVersion = '0.2.1';
 const existing = globalThis.__chatgptTrafficLight;
 if (existing?.active && existing.version === agentVersion) {
   existing.scan();
@@ -30,6 +30,7 @@ function startObserver() {
       lastSignature = '';
     }
     const observation = { ...detect(document, location.href), url, documentId, cancelled, title: document.title.slice(0, 120) };
+    observation.diagnostics.observerVersion = agentVersion;
     const signature = JSON.stringify(observation);
     if (!force && signature === lastSignature && observation.state !== 'completed' && Date.now() - lastSent < 15000) return { ok: true };
     lastSignature = signature;

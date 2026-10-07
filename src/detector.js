@@ -56,41 +56,87 @@ function hash(text) {
   return (value >>> 0).toString(36);
 }
 
+const REPLY_BODIES = '.markdown, .prose, [data-testid="message-content"]';
+const GOOD_LABEL = /^(good response|thumbs up|like|like response|赞|点赞|好评|喜欢|喜欢此回复|评价不错|赞此回复)$/;
+const BAD_LABEL = /^(bad response|thumbs down|dislike|dislike response|踩|点踩|差评|不喜欢|不喜欢此回复|评价不好|踩此回复)$/;
+function feedbackKind(button) {
+  if (!visible(button) || button.closest('pre, code, blockquote, .markdown, .prose, [data-message-author-role="user"], [contenteditable="true"], textarea')) return null;
+  const names = [button.getAttribute('aria-label'), button.getAttribute('title')].map(normalize);
+  if (button.matches('[data-testid="good-response-turn-action-button"]') || names.some(name => GOOD_LABEL.test(name))) return 'good';
+  if (button.matches('[data-testid="bad-response-turn-action-button"]') || names.some(name => BAD_LABEL.test(name))) return 'bad';
+  return null;
+}
 function replyEvidence(doc, allowLocalFallback) {
   const messages = [...doc.querySelectorAll('[data-message-author-role]')].filter(visible);
+  const bodies = [...doc.querySelectorAll(REPLY_BODIES)].filter(el => visible(el) && !el.closest('pre, code, blockquote, form, nav, aside, [data-message-author-role="user"]'));
+  // Nested prose/markdown wrappers are one body, rather than multiple replies.
+  const outerBodies = bodies.filter(el => !bodies.some(other => other !== el && other.contains(el)));
+  const feedback = [...doc.querySelectorAll('button, [role="button"]')].map(button => ({ button, kind: feedbackKind(button) })).filter(item => item.kind);
   const latestMessage = messages.at(-1);
-  if (latestMessage && latestMessage.getAttribute('data-message-author-role') !== 'assistant') return { key: '', finished: false };
-  const last = latestMessage || (allowLocalFallback ? [...doc.querySelectorAll('.markdown, .prose, [data-testid="message-content"]')].filter(el => visible(el) && !el.closest('pre, code, blockquote')).at(-1) : null);
-  if (!last) return { key: '', finished: false };
-  const trustedFeedback = button => visible(button) && !button.closest('pre, code, blockquote, .markdown, .prose, [contenteditable="true"], textarea');
-  function feedback(turn, positive) {
-    const testId = positive ? 'good-response-turn-action-button' : 'bad-response-turn-action-button';
-    const labels = positive ? /^(good response|thumbs up|like response|赞|点赞|好评|喜欢此回复)$/ : /^(bad response|thumbs down|dislike response|踩|点踩|差评|不喜欢此回复)$/;
-    return [...turn.querySelectorAll('button, [role="button"]')].some(button => trustedFeedback(button) && (button.getAttribute('data-testid') === testId || [button.getAttribute('aria-label'), button.getAttribute('title')].some(label => labels.test(normalize(label)))));
+  const role = latestMessage?.getAttribute('data-message-author-role');
+  const diagnostics = { authoredMessages: messages.length, replyBodies: outerBodies.length, latestRole: ['assistant', 'user'].includes(role) ? role : 'none', feedbackGood: feedback.filter(item => item.kind === 'good').length, feedbackBad: feedback.filter(item => item.kind === 'bad').length, bodyFound: false, scopedGood: false, scopedBad: false, scopeDepth: 0 };
+  const result = { key: '', finished: false, diagnostics };
+  if (latestMessage && role !== 'assistant') return result;
+  const last = latestMessage || (allowLocalFallback ? outerBodies.at(-1) : null);
+  if (!last) return result;
+  diagnostics.bodyFound = true;
+  for (let scope = last, depth = 0; scope && scope !== doc.body && depth <= 8; scope = scope.parentElement, depth++) {
+    // A scope containing another message can borrow old feedback, so stop here.
+    if (messages.some(message => message !== last && scope.contains(message)) || (!latestMessage && outerBodies.some(body => body !== last && scope.contains(body)))) break;
+    const scoped = feedback.filter(item => scope.contains(item.button));
+    diagnostics.scopedGood = scoped.some(item => item.kind === 'good');
+    diagnostics.scopedBad = scoped.some(item => item.kind === 'bad');
+    diagnostics.scopeDepth = depth;
+    if (diagnostics.scopedGood && diagnostics.scopedBad) break;
   }
-  let turn = last.closest('article, [data-testid^="conversation-turn-"]') || last;
-  if (!latestMessage && allowLocalFallback) {
-    // Find the nearest reply body + footer group, never the whole transcript.
-    for (let ancestor = last.parentElement, depth = 0; ancestor && ancestor !== doc.body && depth < 4; ancestor = ancestor.parentElement, depth++) {
-      if (ancestor.querySelectorAll('.markdown, .prose, [data-testid="message-content"]').length !== 1) break;
-      if (feedback(ancestor, true) && feedback(ancestor, false)) { turn = ancestor; break; }
-    }
+  const body = last.matches(REPLY_BODIES) ? last : [...last.querySelectorAll(REPLY_BODIES)].find(visible);
+  let text;
+  if (body) text = body.textContent;
+  else {
+    const copy = last.cloneNode(true);
+    for (const control of copy.querySelectorAll('button, [role="button"], [role="toolbar"]')) control.remove();
+    text = copy.textContent;
   }
-  const key = hash((last.getAttribute('data-message-id') || turn.id || '') + ':' + last.textContent);
-  return { key, finished: Boolean(last.textContent.trim() && feedback(turn, true) && feedback(turn, false)) };
+  // Feedback appearing or moving must not make an old reply look like a new one.
+  result.key = hash((last.getAttribute('data-message-id') || last.id || '') + ':' + text);
+  result.finished = Boolean(text.trim() && diagnostics.scopedGood && diagnostics.scopedBad);
+  return result;
 }
 
+function stopBlockedReason(element) {
+  if (!element || !visible(element)) return 'hidden';
+  if (element.closest(UNTRUSTED)) return 'message-content';
+  if (element.disabled || element.getAttribute('aria-disabled') === 'true') return 'disabled';
+  if (element.closest(MEDIA)) return 'media';
+  const win = element.ownerDocument.defaultView;
+  if (win.getComputedStyle(element).pointerEvents === 'none') return 'pointer-disabled';
+  if (!opaque(element)) return 'transparent';
+  const names = [element.getAttribute('aria-label'), element.getAttribute('title'), element.textContent];
+  return element.matches(STOP_SELECTORS) || names.some(name => stopName.test(normalize(name))) ? null : 'not-stop';
+}
 export function isStopControl(target) {
-  const element = target?.closest?.(`${STOP_SELECTORS}, button, [role="button"]`);
-  if (!element || !safe(element) || element.disabled || element.getAttribute('aria-disabled') === 'true') return false;
-  if (element.closest(MEDIA)) return false;
+  return stopBlockedReason(target?.closest?.(`${STOP_SELECTORS}, button, [role="button"]`)) === null;
+}
+
+function opaque(element) {
   const win = element.ownerDocument.defaultView;
   for (let node = element; node?.nodeType === 1; node = node.parentElement) {
-    const style = win.getComputedStyle(node);
-    if (style.opacity === '0' || style.pointerEvents === 'none') return false;
+    if (win.getComputedStyle(node).opacity === '0') return false;
   }
-  const names = [element.getAttribute('aria-label'), element.getAttribute('title'), element.textContent];
-  return element.matches(STOP_SELECTORS) || names.some(name => stopName.test(normalize(name)));
+  return true;
+}
+
+function composerEvidence(main) {
+  const editors = [...main.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')].filter(el => visible(el) && !el.disabled && !el.readOnly && !el.closest('[role="dialog"], [role="alertdialog"], [data-message-author-role], .markdown, .prose, pre, code, nav, aside'));
+  const names = /^(send|send message|send prompt|发送|发送消息|发送提示|发送提示词)$/;
+  const readyEditors = editors.filter(editor => {
+    // Existing supported ChatGPT editor retains its explicit idle signal.
+    if (editor.matches('#prompt-textarea, textarea[data-testid="prompt-textarea"]')) return true;
+    const form = editor.closest(COMPOSER);
+    if (!form || form.matches(PENDING_SELECTORS)) return false;
+    return [...form.querySelectorAll('button, [role="button"]')].some(button => safe(button) && opaque(button) && (button.matches('[data-testid="send-button"]') || [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent].some(value => names.test(normalize(value)))));
+  });
+  return { editors: editors.length, readyEditors: readyEditors.length };
 }
 
 function strongStop(element) {
@@ -110,6 +156,9 @@ export function detect(doc, href) {
 
   const reply = isChat || isLocal ? replyEvidence(doc, isLocal) : { key: '', finished: false };
   base.diagnostics.finishedReply = reply.finished;
+  base.diagnostics.reply = reply.diagnostics || null;
+  const composer = composerEvidence(main);
+  base.diagnostics.composer = composer;
   base.completionKey = reply.key;
   const rawMarkers = [...main.querySelectorAll(isLocal ? `${STATUS_SELECTORS}, header [role="status"], [role="status"][aria-live]` : STATUS_SELECTORS)];
   const markers = rawMarkers.filter(el => safe(el) && !el.closest('[role="log"], [data-testid="task-history"]'));
@@ -122,7 +171,8 @@ export function detect(doc, href) {
   base.diagnostics.stopSamples = stopCandidates.slice(0, 8).map(el => ({
     typed: el.matches(STOP_SELECTORS), strong: strongStop(el), visible: visible(el),
     actionable: isStopControl(el), media: Boolean(el.closest(MEDIA)),
-    inComposer: Boolean(el.closest(COMPOSER)), eligible: stops.includes(el)
+    inComposer: Boolean(el.closest(COMPOSER)), eligible: stops.includes(el),
+    blockedReason: stopBlockedReason(el)
   }));
   const thinkingControls = [...main.querySelectorAll(THINKING_SELECTORS)].filter(el => safe(el) && !el.closest('[role="log"], [data-testid="task-history"]') && markerState(el) === 'running');
   base.diagnostics.thinkingControls = thinkingControls.length;
@@ -168,8 +218,8 @@ export function detect(doc, href) {
     return { ...base, state: 'completed', reason: '任务状态显示已完成' };
   }
   if ((isChat || isLocal) && reply.finished) return { ...base, state: 'completed', reason: '最新回复已出现赞/踩反馈控件' };
-  if (isChat && [...main.querySelectorAll('#prompt-textarea, textarea[data-testid="prompt-textarea"]')].some(visible)) {
-    return { ...base, state: 'idle', reason: '聊天输入框已就绪' };
+  if ((isChat || isLocal) && composer.readyEditors) {
+    return { ...base, state: 'idle', reason: '消息输入区已就绪，未检测到执行或待处理信号' };
   }
   return base;
 }

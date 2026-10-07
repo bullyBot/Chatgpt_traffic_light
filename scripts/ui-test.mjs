@@ -282,6 +282,44 @@ try {
     return el && getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)';
   }), 'unknown card has unlit dot');
   console.log('PASS finished /local/: historical thinking + invisible/ambiguous Stop stay idle/red; other running page stays green; no old completion notification');
+  // Exercise layouts that v0.2.0 did not handle, using real Chromium CSS inheritance.
+  await replace('<form style="pointer-events:none"><div contenteditable="true" role="textbox"></div><button aria-label="Stop" style="pointer-events:auto">■</button></form>');
+  await stateIs('running');
+  assert.equal((await records())[tabId].diagnostics.stopSamples[0].blockedReason, null);
+  await replace('<form><div contenteditable="true" role="textbox"></div><button aria-label="发送消息" disabled>↑</button><button aria-label="Stop" hidden>■</button></form>');
+  await stateIs('unknown');
+  assert.equal((await records())[tabId].diagnostics.composer.readyEditors, 1);
+  assert.equal((await notices()).length, 4, 'Ready Send alone cannot notify completion after running');
+  await replace('<section><div data-message-author-role="assistant">新的完整回复</div><footer><button aria-label="喜欢">赞</button><button aria-label="不喜欢">踩</button></footer></section>');
+  await stateIs('complete');
+  await waitFor(async () => (await notices()).length === 5, 'completion with sibling feedback footer');
+  await finished.page.locator('main').evaluate(main => {
+    main.innerHTML = '<div><span>正在思考</span></div><section><div><div class="prose"><div class="markdown">已有结果</div></div></div><footer><button title="Thumbs up">赞</button><button title="Thumbs down">踩</button></footer></section>';
+  });
+  await waitFor(async () => (await records())[finished.tabId]?.diagnostics.reply?.replyBodies === 1 && (await records())[finished.tabId]?.status === 'idle', 'nested local reply body remains idle');
+  const ready = await newTask('https://chatgpt.com/local/ready-composer', false);
+  await ready.page.locator('main').evaluate(main => { main.innerHTML = '<form><textarea></textarea><button aria-label="发送消息" disabled>↑</button><button aria-label="Stop" hidden>■</button></form>'; });
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  await waitFor(async () => (await records())[ready.tabId]?.status === 'idle', 'fresh local custom composer is idle');
+  assert.equal((await notices()).length, 5);
+  console.log('PASS CSS pointer-events override, sibling/nested reply footers and custom idle composer; ready editor alone never sends completion');
+  const historical = await newTask('https://chatgpt.com/c/historical-feedback', false);
+  await historical.page.locator('main').evaluate(main => {
+    main.innerHTML = '<section id="turn"><div data-message-author-role="assistant"><div class="markdown">历史回复</div></div><button aria-label="Good response" hidden>赞</button><button aria-label="Bad response" hidden>踩</button></section><button data-testid="stop-button">Stop</button>';
+  });
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  await waitFor(async () => (await records())[historical.tabId]?.status === 'running', 'historical reply baseline observed');
+  const historicalKey = (await records())[historical.tabId].baseline;
+  await historical.page.locator('main').evaluate(main => {
+    main.querySelector('[data-testid="stop-button"]').remove();
+    for (const button of main.querySelectorAll('[hidden]')) button.hidden = false;
+  });
+  await waitFor(async () => (await records())[historical.tabId]?.status === 'unknown', 'same old reply does not confirm this run');
+  await new Promise(resolve => setTimeout(resolve, 3500));
+  assert.equal((await records())[historical.tabId].status, 'unknown');
+  assert.equal((await records())[historical.tabId].baseline, historicalKey);
+  assert.equal((await notices()).length, 5);
+  console.log('PASS old feedback returning is not a new reply and cannot notify completion');
   // With no connected pages, the toolbar has no lit lamp and no question overlay.
   for (const id of taskPages.keys()) await background.evaluate(id => { delete testTabs[id]; chrome.tabs.onRemoved.emit(id); }, id);
   await waitFor(async () => Object.keys(await records()).length === 0, 'all tabs removed');
