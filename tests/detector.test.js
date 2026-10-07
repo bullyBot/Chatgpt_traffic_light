@@ -63,3 +63,36 @@ test('observations contain no chat text or question text', () => {
   const result = scan(reply.replace('结果', 'Sensitive content 1234567'));
   assert.equal(JSON.stringify(result).includes('Sensitive content'), false);
 });
+test('/local/ task pages support visible Stop and Interrupt controls', () => {
+  for (const html of ['<button>Stop</button>', '<button aria-label="Interrupt (Esc)"><svg></svg></button>', '<button title="中断"><span>■</span></button>']) {
+    const result = scan(html, '/local/');
+    assert.equal(result.state, 'running');
+    assert.equal(result.kind, 'task');
+    assert.equal(result.diagnostics.page, 'local');
+  }
+});
+test('/local/ also works without a main element and ignores quoted stop buttons', () => {
+  const dom = new JSDOM('<div id="root"><button aria-label="Stop task">■</button></div>', { url: 'https://chatgpt.com/local/' });
+  assert.equal(detect(dom.window.document, dom.window.location.href).state, 'running');
+  dom.window.close();
+  assert.equal(scan('<div data-message-author-role="assistant"><button>Stop</button></div>', '/local/').state, 'unknown');
+});
+test('/local/ includes a task stop control in a footer outside main', () => {
+  const dom = new JSDOM('<main><p>Task output</p></main><footer><button aria-label="Interrupt">■</button></footer>', { url: 'https://chatgpt.com/local/' });
+  assert.equal(detect(dom.window.document, dom.window.location.href).state, 'running');
+  dom.window.close();
+});
+test('/local/ requires explicit live completion or approval signals', () => {
+  assert.equal(scan('<p>Completed. Waiting for approval.</p>', '/local/').state, 'unknown');
+  assert.equal(scan('<header><div role="status" aria-live="polite">Working</div></header>', '/local/').state, 'running');
+  assert.equal(scan('<header><div role="status" aria-live="polite">Completed</div></header>', '/local/').state, 'completed');
+  assert.equal(scan('<div role="dialog"><button>Approve</button></div>', '/local/').state, 'attention');
+});
+test('/local/ keeps existing completed markers in its baseline while another task runs', () => {
+  const old = '<div data-task-status="completed" id="old-task"></div>';
+  const active = scan(old + '<button>Interrupt</button>', '/local/');
+  const after = scan(old, '/local/');
+  assert.equal(active.state, 'running');
+  assert.equal(active.completionKey, after.completionKey);
+  assert.ok(active.completionKey);
+});

@@ -42,12 +42,18 @@ test('completion requires an observed run, fresh evidence and a stable confirmat
 test('task status completion supports repeated runs at the same task URL', () => {
   let previous;
   for (let i = 0; i < 2; i++) {
-    const start = step(previous, 'running', i * 10000, { kind: 'task', completionKey: 'task:1' });
+    const start = step(previous, 'running', i * 10000, { kind: 'task', completionKey: '' });
     const candidate = step(start.task, 'completed', i * 10000 + 100, { kind: 'task', completionKey: 'task:1' });
     const final = step(candidate.task, 'completed', i * 10000 + 100 + CONFIRM_MS, { kind: 'task', completionKey: 'task:1' });
     assert.deepEqual(final.events, ['complete']);
     previous = final.task;
   }
+});
+test('historical completed task markers cannot finish a different active task', () => {
+  const start = step(null, 'running', 0, { kind: 'task', completionKey: 'old-task' });
+  const result = step(start.task, 'completed', 5000, { kind: 'task', completionKey: 'old-task' });
+  assert.equal(result.task.status, 'unknown');
+  assert.deepEqual(result.events, []);
 });
 test('streaming resumes or evidence changes: completion confirmation starts over', () => {
   const start = step(null, 'running');

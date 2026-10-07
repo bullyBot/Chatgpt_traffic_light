@@ -9,6 +9,17 @@ const context = await browser.newContext();
 const errors = [];
 context.on('weberror', error => errors.push(error.error().message));
 const background = await context.newPage();
+const taskPages = new Map();
+await background.exposeFunction('__sendToTab', async (id, message) => {
+  const page = taskPages.get(id);
+  if (!page) throw new Error('Receiving end does not exist');
+  return page.evaluate(message => __dispatchContent(message), message);
+});
+await background.exposeFunction('__injectToTab', async id => {
+  const page = taskPages.get(id);
+  if (!page) throw new Error('Cannot access tab');
+  await page.addScriptTag({ path: 'dist/content.js' });
+});
 background.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
 try {
   await context.route('https://background.test/**', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>Extension API test harness</title>' }));
@@ -29,7 +40,7 @@ try {
     globalThis.testOpen = [];
     globalThis.notificationPermission = 'granted';
     globalThis.chrome = {
-      runtime: { id: 'test-extension', onMessage: event() },
+      runtime: { id: 'test-extension', onMessage: event(), onInstalled: event(), onStartup: event() },
       storage: { session: area(session), local: area(local) },
       action: {
         setIcon: async value => { testAction.icon = value; },
@@ -47,8 +58,9 @@ try {
         query: async () => Object.values(testTabs),
         get: async id => { if (!testTabs[id]) throw new Error('closed'); return testTabs[id]; },
         update: async (id, options) => { testOpen.push({ id, ...options }); },
-        create: async options => { testOpen.push(options); }, sendMessage: async () => {}
+        create: async options => { testOpen.push(options); }, sendMessage: async (id, message) => __sendToTab(id, message)
       },
+      scripting: { executeScript: async ({ target }) => __injectToTab(target.tabId) },
       windows: { update: async () => {} },
       alarms: { create: async () => {}, onAlarm: event() }
     };
@@ -61,13 +73,14 @@ try {
   const shell = '<!doctype html><html><head><meta charset="utf-8"><title>演示任务 · ChatGPT</title></head><body><main><div id="prompt-textarea" contenteditable="true"></div></main></body></html>';
   await context.route('https://chatgpt.com/**', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: shell }));
   let nextId = 1;
-  async function newTask(url) {
+  async function newTask(url, inject = true) {
     const page = await context.newPage();
     const tabId = nextId++;
+    taskPages.set(tabId, page);
     await background.evaluate(({ tabId, url }) => { testTabs[tabId] = { id: tabId, url, windowId: 1 }; }, { tabId, url });
     await page.exposeFunction('__sendToExtension', message => background.evaluate(({ message, sender }) => dispatch(message, sender), { message, sender: { id: 'test-extension', frameId: 0, url: page.url(), tab: { id: tabId } } }));
     const content = await readFile('dist/content.js', 'utf8');
-    await page.addInitScript({ content: `globalThis.chrome = { runtime: { id: 'test-extension', sendMessage: message => __sendToExtension(message), onMessage: { addListener() {} } } }; document.addEventListener('DOMContentLoaded', () => { ${content}\n });` });
+    await page.addInitScript({ content: `globalThis.__contentListeners = []; globalThis.__dispatchContent = message => new Promise((resolve, reject) => { const pending = __contentListeners.map(listener => listener(message, {}, resolve)); if (!pending.includes(true)) reject(new Error('Receiving end does not exist')); }); globalThis.chrome = { runtime: { id: 'test-extension', sendMessage: message => __sendToExtension(message), onMessage: { addListener(listener) { __contentListeners.push(listener); }, removeListener(listener) { __contentListeners = __contentListeners.filter(item => item !== listener); } } } }; ${inject ? `document.addEventListener('DOMContentLoaded', () => { ${content}\n });` : ''}` });
     await page.goto(url);
     return { page, tabId };
   }
@@ -81,12 +94,22 @@ try {
     }
     throw new Error(`Timed out: ${description}; ${JSON.stringify(await records())}`);
   }
-  const { page, tabId } = await newTask('https://chatgpt.com/c/test-run');
+  const { page, tabId } = await newTask('https://chatgpt.com/c/test-run', false);
   const stateIs = status => waitFor(async () => (await records())[tabId]?.status === status, status);
   const replace = html => page.locator('main').evaluate((main, value) => { main.innerHTML = value; }, html);
   const stop = '<button data-testid="stop-button">Stop</button>';
   const reply = '<article><div data-message-author-role="assistant" data-message-id="new">完整结果</div><button data-testid="good-response-turn-action-button">Good response</button><button data-testid="bad-response-turn-action-button">Bad response</button></article>';
+  assert.equal((await records())[tabId], undefined);
+  const connected = await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  assert.equal(connected.connected, 1);
   await stateIs('idle');
+  console.log('PASS existing tab without content script connects without a page reload');
+  const documentId = (await records())[tabId].documentId;
+  await page.addScriptTag({ path: 'dist/content.js' });
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  assert.equal((await records())[tabId].documentId, documentId);
+  assert.equal(await page.evaluate(() => __contentListeners.length), 1);
+  console.log('PASS repeated injection is idempotent and preserves the task baseline');
   await replace(reply);
   await new Promise(resolve => setTimeout(resolve, 3000));
   assert.equal((await notices()).length, 0);
@@ -163,7 +186,10 @@ try {
   assert.equal((await notices()).length, 2);
   console.log('PASS keyboard cancellation: Escape cannot produce a false completion');
 
+  const beforeReload = (await records())[tabId].documentId;
   await page.reload();
+  await background.evaluate(id => chrome.tabs.onUpdated.emit(id, { status: 'complete' }), tabId);
+  await waitFor(async () => (await records())[tabId]?.documentId !== beforeReload, 'new observer after reload');
   await stateIs('idle');
   assert.equal((await notices()).length, 2);
   await background.evaluate(() => chrome.notifications.onClicked.emit(testNotifications[0].id));
@@ -182,5 +208,27 @@ try {
   assert.equal((await notices()).length, 2);
   assert.deepEqual(errors, []);
   console.log('PASS notification denial is reported, no uncaught browser errors');
+  const local = await newTask('https://chatgpt.com/local/', false);
+  await local.page.locator('main').evaluate(main => { main.innerHTML = '<button aria-label="Interrupt (Esc)">■</button>'; });
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  await waitFor(async () => (await records())[local.tabId]?.status === 'running', 'local running after reconnect');
+  assert.equal((await records())[local.tabId].diagnostics.page, 'local');
+  console.log('PASS /local/ existing running task reconnects and shows red');
+  await local.page.evaluate(() => history.pushState({}, '', '/local/another-task'));
+  await waitFor(async () => (await records())[local.tabId]?.url === 'https://chatgpt.com/local/another-task', 'SPA navigation updates task identity');
+  assert.equal((await records())[local.tabId].status, 'running');
+  assert.deepEqual(errors, []);
+  console.log('PASS /local/ SPA navigation is not rejected as an old sender URL');
+  await background.evaluate(() => { notificationPermission = 'granted'; });
+  await local.page.locator('main').evaluate(main => { main.innerHTML = '<button aria-label="Interrupt (Esc)">■</button><div role="dialog"><h2>批准本地操作</h2><button>Approve</button></div>'; });
+  await waitFor(async () => (await records())[local.tabId]?.status === 'attention', 'local yellow');
+  await waitFor(async () => (await notices()).length === 3, 'local yellow notification');
+  await local.page.locator('main').evaluate(main => { main.innerHTML = '<button aria-label="Interrupt (Esc)">■</button>'; });
+  await waitFor(async () => (await records())[local.tabId]?.status === 'running', 'local resumed');
+  await local.page.locator('main').evaluate(main => { main.innerHTML = '<header><div role="status" aria-live="polite">Completed</div></header>'; });
+  await waitFor(async () => (await records())[local.tabId]?.status === 'complete', 'local confirmed completion');
+  await waitFor(async () => (await notices()).length === 4, 'local green notification');
+  assert.deepEqual(errors, []);
+  console.log('PASS /local/ running → approval → resumed → confirmed completion notifications');
   console.log('Browser UI/integration harness passed. Chrome APIs were simulated; real MV3 loading and Windows notifications are separate acceptance checks.');
 } finally { await browser.close(); }

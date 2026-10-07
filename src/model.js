@@ -19,7 +19,7 @@ export function transition(previous, observation, now) {
   const old = sameDocument ? previous : null;
   const task = {
     ...old, url: observation.url, documentId: observation.documentId,
-    title: observation.title || 'ChatGPT 任务', lastSeen: now,
+    title: observation.title || 'ChatGPT 任务', lastSeen: now, diagnostics: observation.diagnostics || null,
     cycle: old?.cycle || 0, active: old?.active || false,
     status: 'unknown', reason: observation.reason || '', candidate: null
   };
@@ -59,7 +59,7 @@ export function transition(previous, observation, now) {
     const key = observation.completionKey;
     if (old?.status === 'complete' && old?.finishedKey === key) {
       task.status = 'complete';
-    } else if (task.active && key && (observation.kind === 'task' || key !== task.baseline)) {
+    } else if (task.active && key && key !== task.baseline) {
       const candidate = old?.candidate?.key === key && now - old.lastSeen <= STALE_MS ? old.candidate : { key, since: now };
       task.candidate = candidate;
       task.status = 'unknown';

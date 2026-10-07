@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT 任务红绿灯",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "用红绿灯查看已打开的 ChatGPT 任务；需要处理或确认完成时发送桌面通知。",
   "minimum_chrome_version": "120",
-  "permissions": ["storage", "notifications", "alarms"],
+  "permissions": ["storage", "notifications", "alarms", "scripting"],
   "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {

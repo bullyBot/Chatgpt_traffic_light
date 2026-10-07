@@ -13,14 +13,16 @@ async function refresh() {
     if (signature === lastRender) return;
     lastRender = signature;
     $('signal').className = `signal ${state.status}`;
-    $('summary').textContent = state.tasks.length ? LABELS[state.status] : '等待任务';
+    $('summary').textContent = state.tasks.length ? LABELS[state.status] : '等待连接';
     const count = state.tasks.filter(task => task.status === 'attention').length;
     $('summary-detail').textContent = count ? `${count} 个页面等待你的下一步` : state.tasks.length ? '需要你时，这里会亮起黄灯' : '打开页面，让进度一目了然';
     $('count').textContent = `${state.tasks.length} 个页面`;
     $('empty').hidden = Boolean(state.tasks.length);
     $('notifications').checked = state.notificationsEnabled;
-    $('error').hidden = !state.notificationError;
-    $('error').textContent = state.notificationError;
+    const error = [state.connectionError, state.notificationError].filter(Boolean).join('；');
+    $('error').hidden = !error;
+    $('error').textContent = error;
+    $('diagnostics').textContent = JSON.stringify({ connection: state.connectionError || '已连接', pages: state.tasks.map(task => ({ state: task.status, signals: task.diagnostics })) }, null, 2);
     const fragment = document.createDocumentFragment();
     for (const task of state.tasks.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))) {
       const button = element('button', `task ${task.status}`, '');
@@ -38,8 +40,16 @@ $('notifications').addEventListener('change', async event => {
   await chrome.runtime.sendMessage({ type: 'setNotifications', enabled: event.target.checked });
   await refresh();
 });
-$('refresh').addEventListener('click', async () => { await chrome.runtime.sendMessage({ type: 'rescan' }); await refresh(); });
+async function reconnectPages() {
+  const button = $('refresh');
+  button.disabled = true;
+  try { await chrome.runtime.sendMessage({ type: 'rescan' }); await refresh(); }
+  catch { $('error').textContent = '重新连接失败，请重新加载扩展后再试'; $('error').hidden = false; }
+  finally { button.disabled = false; }
+}
+$('refresh').addEventListener('click', reconnectPages);
 $('open-chat').addEventListener('click', () => chrome.tabs.create({ url: 'https://chatgpt.com/' }));
 chrome.storage.onChanged.addListener(() => refresh());
 refresh();
+reconnectPages();
 setInterval(refresh, 5000);

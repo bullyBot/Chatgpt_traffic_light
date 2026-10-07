@@ -1,4 +1,5 @@
 import { aggregate, canonicalUrl, displayedTask, LABELS, transition } from './model.js';
+import { connectTab, SITES } from './connection.js';
 
 const COLORS = { running: '#ef6461', attention: '#f5bd4f', complete: '#54d69a', idle: '#54d69a', unknown: '#8190a8', error: '#8190a8' };
 let queue = Promise.resolve();
@@ -39,12 +40,45 @@ async function render(records) {
   ]);
 }
 function validObservation(value, sender) {
+  const sourceUrl = canonicalUrl(sender.url);
   return sender.tab?.id !== undefined && sender.frameId === 0 && value &&
-    canonicalUrl(value.url) === value.url && canonicalUrl(sender.url) === value.url &&
+    typeof value.url === 'string' && canonicalUrl(value.url) === value.url && sourceUrl && new URL(sourceUrl).origin === new URL(value.url).origin &&
     typeof value.documentId === 'string' && value.documentId.length <= 100 &&
     ['running', 'attention', 'completed', 'idle', 'unknown', 'error'].includes(value.state) &&
     ['chat', 'task'].includes(value.kind) &&
     ['title', 'reason', 'completionKey', 'attentionKey'].every(key => value[key] === undefined || (typeof value[key] === 'string' && value[key].length <= 500));
+}
+
+let connectionRun;
+async function reconnect() {
+  if (connectionRun) return connectionRun;
+  connectionRun = (async () => {
+    let tabs;
+    try { tabs = await chrome.tabs.query({ url: SITES }); }
+    catch {
+      await chrome.storage.session.set({ connectionError: '无法查找 ChatGPT 页面，请检查扩展的网站访问权限' });
+      return { ok: false };
+    }
+    const results = await Promise.all(tabs.map(async tab => {
+      const result = await connectTab(chrome, tab);
+      if (!result.ok && canonicalUrl(tab.url)) await serial(async () => {
+        const data = await read();
+        data.records[tab.id] = {
+          ...data.records[tab.id], tabId: tab.id, url: canonicalUrl(tab.url),
+          documentId: `unconnected:${tab.id}`, active: false, candidate: null,
+          title: tab.title || 'ChatGPT 页面', status: 'unknown', reason: result.reason, lastSeen: Date.now()
+        };
+        await chrome.storage.session.set({ records: data.records });
+        await render(data.records);
+      });
+      return result;
+    }));
+    const failed = results.filter(result => !result.ok).length;
+    const connectionError = failed ? `${failed} 个页面未连接：${results.find(result => !result.ok).reason}` : tabs.length ? '' : '未发现可连接的 ChatGPT 标签页。请在当前 Chrome 中打开任务，并允许扩展访问 chatgpt.com。';
+    await chrome.storage.session.set({ connectionError });
+    return { ok: failed === 0 && tabs.length > 0, connected: results.length - failed, found: tabs.length };
+  })();
+  try { return await connectionRun; } finally { connectionRun = null; }
 }
 async function observe(observation, sender) {
   if (!validObservation(observation, sender)) return { ok: false };
@@ -106,8 +140,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     serial(async () => {
       const data = await read();
       const { notificationsEnabled = true } = await chrome.storage.local.get('notificationsEnabled');
+      const { connectionError = '' } = await chrome.storage.session.get('connectionError');
       const tasks = Object.values(data.records).map(task => displayedTask(task, Date.now()));
-      return { tasks, status: aggregate(tasks), notificationsEnabled, notificationError: data.notificationError };
+      return { tasks, status: aggregate(tasks), notificationsEnabled, notificationError: data.notificationError, connectionError };
     }).then(respond, () => respond({ error: true }));
     return true;
   }
@@ -123,10 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return true;
   }
   if (message.type === 'rescan') {
-    chrome.tabs.query({ url: ['https://chatgpt.com/*', 'https://chat.openai.com/*'] }).then(async tabs => {
-      await Promise.allSettled(tabs.map(tab => chrome.tabs.sendMessage(tab.id, { type: 'scan' })));
-      respond({ ok: true });
-    });
+    reconnect().then(respond, () => respond({ ok: false }));
     return true;
   }
 });
@@ -142,6 +174,7 @@ chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
   await chrome.storage.session.set(data); await render(data.records);
 }));
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status === 'complete') reconnect().catch(error => console.error(error.message));
   if (!change.url && !change.discarded && change.status !== 'loading') return;
   serial(async () => {
     const data = await read();
@@ -165,4 +198,6 @@ chrome.alarms.onAlarm.addListener(alarm => {
   });
 });
 chrome.alarms.create('freshness', { periodInMinutes: .5 });
-serial(async () => { const data = await read(); await render(data.records); });
+chrome.runtime.onInstalled.addListener(() => reconnect().catch(error => console.error(error.message)));
+chrome.runtime.onStartup.addListener(() => reconnect().catch(error => console.error(error.message)));
+serial(async () => { const data = await read(); await render(data.records); }).then(() => reconnect()).catch(error => console.error(error.message));
