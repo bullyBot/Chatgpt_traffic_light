@@ -2,7 +2,7 @@ export const CONFIRM_MS = 2500;
 export const STALE_MS = 90000;
 export const LABELS = {
   running: '正在进行', attention: '需要你处理', complete: '已完成',
-  idle: '空闲', unknown: '状态未知', error: '任务异常'
+  idle: '空闲', stopped: '已停止', unknown: '未识别', error: '任务异常'
 };
 
 export function canonicalUrl(value) {
@@ -33,6 +33,7 @@ export function transition(previous, observation, now) {
   };
 
   if (observation.cancelled) {
+    task.status = 'stopped';
     task.active = false;
     task.cancelled = true;
     task.reason = '已停止；不会发送完成提醒';
@@ -40,6 +41,7 @@ export function transition(previous, observation, now) {
   }
   if (observation.state === 'running') {
     if (old?.cancelled) {
+      task.status = 'stopped';
       task.reason = '正在停止；不会发送完成提醒';
       return { task, events };
     }
@@ -84,6 +86,14 @@ export function transition(previous, observation, now) {
     task.status = 'error';
     task.active = false;
     task.cancelled = false;
+  } else if (observation.state === 'stopped') {
+    task.status = 'stopped';
+    task.active = false;
+    task.cancelled = false;
+  } else if (old?.status === 'stopped' && !task.active) {
+    task.status = 'stopped';
+    task.cancelled = false;
+    task.reason = old.reason;
   }
   return { task, events };
 }
@@ -94,7 +104,7 @@ export function displayedTask(task, now) {
 }
 
 export function aggregate(tasks) {
-  for (const status of ['attention', 'running', 'error', 'unknown', 'complete', 'idle']) {
+  for (const status of ['attention', 'running', 'error', 'unknown', 'stopped', 'complete', 'idle']) {
     if (tasks.some(task => task.status === status)) return status;
   }
   return 'unknown';

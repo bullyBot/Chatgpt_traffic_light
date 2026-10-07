@@ -15,10 +15,10 @@
     <section id="empty" hidden><div class="empty-symbol" aria-hidden="true">◎</div><h3>连接你的任务页面</h3><p>打开 ChatGPT 任务页面即可开始。<br>已有任务？点击右上角重新连接。</p><button id="open-chat" class="primary">打开 ChatGPT <span aria-hidden="true">↗</span></button></section>
     <p id="error" class="error" role="status" hidden></p>
     <label class="notification-setting"><span><strong>桌面通知</strong><small>需要你处理 · 确认完成</small></span><input id="notifications" type="checkbox" role="switch" aria-label="桌面通知"><span class="switch" aria-hidden="true"></span></label>
-    <details><summary>灯色说明与监测范围</summary><div class="legend"><p>🔴 正在进行　🟡 需要你处理</p><p>🟢 完成或空闲　⚪ 未知或异常</p><p>仅监测已打开的页面。绿色完成通知需要先观察到执行，再确认结束标记。普通回复中的提问可能无法识别；关闭或休眠的页面无法保证实时更新。</p></div></details>
+    <details><summary>灯色说明与监测范围</summary><div class="legend"><p>🟢 正在进行　🟡 需要你处理</p><p>🔴 停止、完成或空闲；异常也亮红灯并显示原因。</p><p>未识别时三盏灯均不亮，请查看页面确认。仅监测已打开的页面。完成通知需要先观察到执行，再确认结束标记。普通回复中的提问可能无法识别；关闭或休眠的页面无法保证实时更新。</p></div></details>
     <details><summary>连接诊断</summary><pre id="diagnostics"></pre></details>
   </main>
-  <footer><span class="privacy-dot"></span>状态保存在本机 <span>v0.1.2</span></footer>
+  <footer><span class="privacy-dot"></span>状态保存在本机 <span>v0.2.0</span></footer>
   <script src="popup.js" type="module"></script>
 </body>
 </html>

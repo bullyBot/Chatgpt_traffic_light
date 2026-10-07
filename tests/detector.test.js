@@ -43,7 +43,7 @@ test('the newest incomplete reply prevents an older complete reply from looking 
   assert.equal(scan(reply + '<article><div data-message-author-role="assistant">进行中…</div></article>').state, 'unknown');
 });
 test('task status adapters recognize explicit states on task detail pages', () => {
-  for (const [input, expected] of [['running', 'running'], ['awaiting_approval', 'attention'], ['completed', 'completed'], ['failed', 'error'], ['cancelled', 'error']]) {
+  for (const [input, expected] of [['running', 'running'], ['awaiting_approval', 'attention'], ['completed', 'completed'], ['failed', 'error'], ['cancelled', 'stopped'], ['已停止', 'stopped']]) {
     assert.equal(scan(`<span data-testid="task-status">${input}</span>`, '/codex/tasks/task_1').state, expected);
   }
 });
@@ -109,8 +109,8 @@ test('ongoing thinking labels support ellipses, timers and accessible-label-only
     assert.equal(scan(`<span data-testid="task-status">${value}</span>`, '/local/').state, 'running', value);
   }
   assert.equal(scan('<div role="status" aria-live="polite" aria-label="正在思考"></div>', '/local/').state, 'running');
-  assert.equal(scan('<button aria-expanded="true">正在思考…</button>', '/local/').state, 'running');
-  assert.equal(scan('<header><span>正在思考…</span></header>', '/local/').state, 'running');
+  assert.equal(scan('<button aria-expanded="true">正在思考…</button>', '/local/').state, 'unknown');
+  assert.equal(scan('<header><span>正在思考…</span></header>', '/local/').state, 'unknown');
 });
 test('old thinking summaries, prose and loading indicators cannot imply running or completion', () => {
   for (const value of ['已思考 12 秒', '思考了 12 秒', 'Loading...', 'Completed 2 of 5 steps', '正在思考如何完成这个任务']) {
@@ -141,4 +141,41 @@ test('expanded marker diagnostics do not contain raw text, labels, task IDs or c
   assert.equal(output.includes('private output'), false);
   assert.equal(output.includes('private-task-id'), false);
   assert.equal(result.diagnostics.markerSamples[0].recognized, 'unrecognized');
+});
+
+const localReply = '<section><div class="markdown">本轮完整结果</div><div><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></div></section>';
+test('completed local reply ignores historical user thinking bubble and ambiguous Stop', () => {
+  const result = scan('<div><span>正在思考</span></div>' + localReply + '<button aria-label="Stop">■</button>', '/local/');
+  assert.equal(result.state, 'completed');
+  assert.equal(result.diagnostics.finishedReply, true);
+  assert.equal(result.diagnostics.thinkingControls, 0);
+  assert.equal(result.diagnostics.stopControls, 0);
+  assert.equal(result.diagnostics.stopSamples[0].eligible, false);
+});
+test('invisible, non-interactive and media Stop controls cannot imply running', () => {
+  for (const html of [
+    '<div style="opacity:0"><button data-testid="stop-button">Stop</button></div>',
+    '<button style="pointer-events:none" data-testid="stop-button">Stop</button>',
+    '<section data-testid="audio-player"><button>Stop</button></section>',
+    '<button hidden data-testid="stop-button">Stop</button>'
+  ]) {
+    assert.equal(scan(html, '/local/').state, 'unknown');
+    assert.equal(scan(localReply + html, '/local/').state, 'completed');
+  }
+});
+test('strong task controls and composer Stop take priority over an old final reply', () => {
+  for (const html of ['<button data-testid="stop-button">Stop</button>', '<button aria-label="Interrupt (Esc)">■</button>', '<button>停止生成</button>', '<form><button>Stop</button></form>']) {
+    assert.equal(scan(localReply + html, '/local/').state, 'running');
+  }
+  assert.equal(scan(reply + '<button>Stop</button>').state, 'running');
+  assert.equal(scan('<span data-testid="thinking-indicator">正在思考…</span>', '/local/').state, 'running');
+});
+test('feedback on older turns, quoted controls or a lone action does not end the latest local reply', () => {
+  for (const html of [localReply + '<section><div class="markdown">新回复尚未完成</div></section>', '<div class="markdown">代码示例<button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></div>', '<section><div class="markdown">结果</div><button aria-label="Good response">赞</button></section>', reply + '<div data-message-author-role="user">新问题</div>']) {
+    assert.equal(scan(html, '/local/').state, 'unknown');
+  }
+});
+test('final local feedback overrides a stale generic thinking announcement, but not typed execution', () => {
+  assert.equal(scan(localReply + '<div role="status" aria-live="polite">正在思考</div>', '/local/').state, 'completed');
+  assert.equal(scan(localReply + '<div data-task-status="running"></div>', '/local/').state, 'running');
 });

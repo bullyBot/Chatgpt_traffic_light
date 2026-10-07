@@ -17,10 +17,9 @@ main { padding: 20px 22px 0; }
 .overview { display: flex; align-items: center; gap: 17px; padding: 20px; border: 1px solid #2a3745; border-radius: 14px; background: linear-gradient(125deg, #202d3b, #18212d); }
 .signal { display: flex; flex-direction: column; gap: 6px; padding: 9px 8px; border-radius: 10px; background: #0e151e; border: 1px solid #354050; }
 .signal span { width: 12px; height: 12px; border-radius: 50%; background: #303b49; }
-.signal.running span:first-child { background: #ef6461; box-shadow: 0 0 12px #ef646155; }
+.signal.running span:last-child { background: #54d69a; box-shadow: 0 0 12px #54d69a55; }
 .signal.attention span:nth-child(2) { background: #f5bd4f; box-shadow: 0 0 12px #f5bd4f55; }
-.signal.complete span:last-child, .signal.idle span:last-child { background: #54d69a; box-shadow: 0 0 12px #54d69a55; }
-.signal.unknown span, .signal.error span { background: #78879c; }
+.signal.complete span:first-child, .signal.idle span:first-child, .signal.stopped span:first-child, .signal.error span:first-child { background: #ef6461; box-shadow: 0 0 12px #ef646155; }
 .eyebrow { font-size: 10px; color: #94a4b8; letter-spacing: 2px; margin-bottom: 6px; }
 h2 { font-size: 22px; font-weight: 600; }
 #summary-detail { color: #9caabe; font-size: 11px; margin-top: 7px; line-height: 1.5; }
@@ -30,8 +29,8 @@ h3 { font-size: 12px; font-weight: 600; }.section-heading span { color: #8090a5;
 .task { width: 100%; border: 1px solid #293443; border-radius: 10px; padding: 12px; text-align: left; background: #18212d; color: #eaf0f8; }
 .task:hover { border-color: #526881; background: #202b3a; }
 .task-top { display: flex; gap: 8px; align-items: center; }.task-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 12px; }
-.status-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #8190a8; }
-.task.running .status-dot { background: #ef6461; }.task.attention .status-dot { background: #f5bd4f; }.task.complete .status-dot, .task.idle .status-dot { background: #54d69a; }
+.status-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: transparent; border: 1px solid #526173; }
+.task.running .status-dot { background: #54d69a; border: 0; }.task.attention .status-dot { background: #f5bd4f; border: 0; }.task.complete .status-dot, .task.idle .status-dot, .task.stopped .status-dot, .task.error .status-dot { background: #ef6461; border: 0; }
 .task-status { font-size: 10px; color: #a5b4c8; }.task.attention .task-status { color: #f5bd4f; }
 .task-reason { color: #93a2b7; font-size: 10px; margin-top: 8px; line-height: 1.5; }.task-time { color: #6f8199; font-size: 10px; margin-top: 5px; }
 #empty { text-align: center; padding: 14px 6px 24px; }#empty[hidden] { display: none; }

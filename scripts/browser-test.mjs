@@ -98,7 +98,7 @@ try {
   assert.match((await notices())[1].title, /任务已完成/);
   await new Promise(resolve => setTimeout(resolve, 3000));
   assert.equal((await notices()).length, 2, 'Completion notifies once');
-  console.log('PASS running → ambiguous → confirmed completion: green once');
+  console.log('PASS running → ambiguous → confirmed completion: red, notifies once');
 
   await replace(reply + stop);
   await stateIs('running');
@@ -107,7 +107,7 @@ try {
   await stateIs('idle');
   await new Promise(resolve => setTimeout(resolve, 3000));
   assert.equal((await notices()).length, 2, 'Cancellation must not notify completion');
-  console.log('PASS cancellation: no false green notification');
+  console.log('PASS cancellation: no false completion notification');
 
   await page.reload();
   await stateIs('idle');

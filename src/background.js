@@ -1,7 +1,7 @@
 import { aggregate, canonicalUrl, displayedTask, LABELS, transition } from './model.js';
 import { connectTab, SITES } from './connection.js';
 
-const COLORS = { running: '#ef6461', attention: '#f5bd4f', complete: '#54d69a', idle: '#54d69a', unknown: '#8190a8', error: '#8190a8' };
+const COLORS = { running: '#54d69a', attention: '#f5bd4f', complete: '#ef6461', idle: '#ef6461', stopped: '#ef6461', error: '#ef6461' };
 let queue = Promise.resolve();
 function serial(work) {
   const next = queue.then(work);
@@ -17,15 +17,11 @@ function icon(status, size) {
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#172234';
   ctx.beginPath(); ctx.roundRect(size * .24, 0, size * .52, size, size * .16); ctx.fill();
-  ['running', 'attention', 'complete'].forEach((lamp, index) => {
-    const selected = lamp === status || (lamp === 'complete' && status === 'idle');
+  ['red', 'yellow', 'green'].forEach((lamp, index) => {
+    const selected = lamp === (status === 'running' ? 'green' : status === 'attention' ? 'yellow' : COLORS[status] ? 'red' : null);
     ctx.beginPath(); ctx.arc(size / 2, size * (.19 + .31 * index), size * .125, 0, Math.PI * 2);
     ctx.fillStyle = selected ? COLORS[status] : '#384459'; ctx.fill();
   });
-  if (['unknown', 'error'].includes(status)) {
-    ctx.fillStyle = COLORS[status]; ctx.font = `bold ${size * .65}px sans-serif`; ctx.textAlign = 'center';
-    ctx.fillText(status === 'error' ? '!' : '?', size / 2, size * .74);
-  }
   return ctx.getImageData(0, 0, size, size);
 }
 async function render(records) {
@@ -44,7 +40,7 @@ function validObservation(value, sender) {
   return sender.tab?.id !== undefined && sender.frameId === 0 && value &&
     typeof value.url === 'string' && canonicalUrl(value.url) === value.url && sourceUrl && new URL(sourceUrl).origin === new URL(value.url).origin &&
     typeof value.documentId === 'string' && value.documentId.length <= 100 &&
-    ['running', 'attention', 'completed', 'idle', 'unknown', 'error'].includes(value.state) &&
+    ['running', 'attention', 'completed', 'idle', 'stopped', 'unknown', 'error'].includes(value.state) &&
     ['chat', 'task'].includes(value.kind) &&
     ['title', 'reason', 'completionKey', 'attentionKey'].every(key => value[key] === undefined || (typeof value[key] === 'string' && value[key].length <= 500));
 }

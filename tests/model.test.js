@@ -84,7 +84,9 @@ test('reload and SPA navigation invalidate the previous run', () => {
 test('cancellation suppresses late running and completion signals, but permits a new run', () => {
   const start = step(null, 'running');
   const cancel = step(start.task, 'running', 10, { cancelled: true });
+  assert.equal(cancel.task.status, 'stopped');
   const lateRunning = step(cancel.task, 'running', 20);
+  assert.equal(lateRunning.task.status, 'stopped');
   assert.equal(lateRunning.task.active, false);
   const lateComplete = step(lateRunning.task, 'completed', 30, { completionKey: 'partial' });
   assert.deepEqual(lateComplete.events, []);
@@ -100,6 +102,18 @@ test('persisted state survives serialization without duplicate completion', () =
   assert.deepEqual(final.events, ['complete']);
   assert.deepEqual(step(JSON.parse(JSON.stringify(final.task)), 'completed', 4000, { completionKey: 'new' }).events, []);
 });
+test('stopping stays red while signals disappear and permits the next run without a final reply', () => {
+  const start = step(null, 'running');
+  const cancel = step(start.task, 'running', 10, { cancelled: true });
+  const quiet = step(cancel.task, 'unknown', 20);
+  assert.equal(quiet.task.status, 'stopped');
+  assert.deepEqual(quiet.events, []);
+  assert.equal(step(quiet.task, 'running', 30).task.status, 'running');
+  const explicit = step(start.task, 'stopped', 40);
+  assert.equal(explicit.task.status, 'stopped');
+  assert.deepEqual(explicit.events, []);
+  assert.equal(step(explicit.task, 'completed', 50, { completionKey: 'partial' }).task.status, 'idle');
+});
 test('a stale completion candidate must be confirmed again after reconnecting', () => {
   const start = step(null, 'running');
   const candidate = step(start.task, 'completed', 100, { completionKey: 'new' });
@@ -107,7 +121,7 @@ test('a stale completion candidate must be confirmed again after reconnecting', 
   assert.equal(resumed.task.status, 'unknown');
   assert.deepEqual(resumed.events, []);
 });
-test('aggregate prioritizes attention, then running, then uncertainty over green', () => {
+test('aggregate prioritizes attention, then running, then uncertainty over idle', () => {
   assert.equal(aggregate([]), 'unknown');
   assert.equal(aggregate([{ status: 'running' }, { status: 'attention' }]), 'attention');
   assert.equal(aggregate([{ status: 'complete' }, { status: 'running' }]), 'running');

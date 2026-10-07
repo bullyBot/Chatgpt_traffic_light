@@ -1,6 +1,6 @@
 import { LABELS } from './model.js';
 const $ = id => document.getElementById(id);
-const order = ['attention', 'running', 'error', 'unknown', 'complete', 'idle'];
+const order = ['attention', 'running', 'error', 'unknown', 'stopped', 'complete', 'idle'];
 let lastRender = '';
 function element(tag, className, text) {
   const node = document.createElement(tag); node.className = className; node.textContent = text; return node;

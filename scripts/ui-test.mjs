@@ -94,6 +94,13 @@ try {
     }
     throw new Error(`Timed out: ${description}; ${JSON.stringify(await records())}`);
   }
+  async function iconIs(lit) {
+    const lamps = await background.evaluate(() => {
+      const data = testAction.icon.imageData[32].data;
+      return [.19, .5, .81].map(center => Array.from(data.slice((Math.floor(32 * center) * 32 + 16) * 4, (Math.floor(32 * center) * 32 + 16) * 4 + 3)));
+    });
+    assert.deepEqual(lamps, [0, 1, 2].map(index => index === lit ? [[239, 100, 97], [245, 189, 79], [84, 214, 154]][index] : [56, 68, 89]));
+  }
   const { page, tabId } = await newTask('https://chatgpt.com/c/test-run', false);
   const stateIs = status => waitFor(async () => (await records())[tabId]?.status === status, status);
   const replace = html => page.locator('main').evaluate((main, value) => { main.innerHTML = value; }, html);
@@ -103,6 +110,8 @@ try {
   const connected = await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
   assert.equal(connected.connected, 1);
   await stateIs('idle');
+  await waitFor(() => background.evaluate(() => testAction.title.includes('空闲')), 'idle icon rendered');
+  await iconIs(0);
   console.log('PASS existing tab without content script connects without a page reload');
   const documentId = (await records())[tabId].documentId;
   await page.addScriptTag({ path: 'dist/content.js' });
@@ -117,6 +126,8 @@ try {
 
   await replace(reply + stop);
   await stateIs('running');
+  await waitFor(() => background.evaluate(() => testAction.title.includes('正在进行')), 'running icon rendered');
+  await iconIs(2);
   const requestAt = Date.now();
   await replace(reply + stop + '<div role="dialog"><h2>批准运行命令</h2><button>Approve</button></div>');
   await stateIs('attention');
@@ -124,6 +135,7 @@ try {
   assert.ok(Date.now() - requestAt < 2000);
   assert.match((await notices())[0].title, /需要你处理/);
   assert.equal(await background.evaluate(() => testAction.badge), '1');
+  await iconIs(1);
   await page.locator('main').evaluate(main => main.setAttribute('data-rerender', '1'));
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal((await notices()).length, 1);
@@ -146,6 +158,8 @@ try {
   await popup.getByRole('heading', { name: '需要你处理', exact: true }).waitFor();
   await popup.locator('.task').nth(1).waitFor();
   assert.equal(await popup.locator('.task').count(), 2);
+  assert.equal(await popup.locator('.task.running .status-dot').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(84, 214, 154)');
+  assert.equal(await popup.locator('#signal span:nth-child(2)').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(245, 189, 79)');
   await mkdir('artifacts', { recursive: true });
   await popup.setViewportSize({ width: 380, height: 680 });
   await popup.screenshot({ path: 'artifacts/popup.png', fullPage: true });
@@ -171,6 +185,7 @@ try {
   await replace(reply + stop);
   await stateIs('running');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await stateIs('stopped');
   await replace(reply.replace('完整结果', '中断的部分结果'));
   await stateIs('idle');
   await new Promise(resolve => setTimeout(resolve, 3000));
@@ -213,7 +228,7 @@ try {
   await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
   await waitFor(async () => (await records())[local.tabId]?.status === 'running', 'local running after reconnect');
   assert.equal((await records())[local.tabId].diagnostics.page, 'local');
-  console.log('PASS /local/ existing running task reconnects and shows red');
+  console.log('PASS /local/ existing running task reconnects and shows green');
   await local.page.evaluate(() => history.pushState({}, '', '/local/another-task'));
   await waitFor(async () => (await records())[local.tabId]?.url === 'https://chatgpt.com/local/another-task', 'SPA navigation updates task identity');
   assert.equal((await records())[local.tabId].status, 'running');
@@ -227,7 +242,7 @@ try {
   await waitFor(async () => (await records())[local.tabId]?.status === 'running', 'local resumed');
   await local.page.locator('main').evaluate(main => { main.innerHTML = '<header><div role="status" aria-live="polite">Completed</div></header>'; });
   await waitFor(async () => (await records())[local.tabId]?.status === 'complete', 'local confirmed completion');
-  await waitFor(async () => (await notices()).length === 4, 'local green notification');
+  await waitFor(async () => (await notices()).length === 4, 'local completion notification');
   assert.deepEqual(errors, []);
   console.log('PASS /local/ running → approval → resumed → confirmed completion notifications');
   await local.page.locator('main').evaluate(main => { main.innerHTML = '<div role="status" aria-live="polite"></div>'.repeat(11) + '<div role="status" aria-live="polite">正在思考…</div>'; });
@@ -239,6 +254,43 @@ try {
   await local.page.locator('main').evaluate(main => { main.innerHTML = '<div role="status" aria-live="polite">思考了 12 秒</div><div role="status" aria-live="polite">Completed</div>'; });
   await waitFor(async () => (await records())[local.tabId]?.status === 'unknown', 'historical thought summary is not complete');
   assert.equal((await notices()).length, 4);
-  console.log('PASS user-reported 正在思考 with 12 status nodes: red; past summary/toast stay unknown without green');
+  console.log('PASS user-reported 正在思考 with 12 status nodes: green; past summary/toast stay unknown without completion');
+  const finished = await newTask('https://chatgpt.com/local/finished-task', false);
+  await finished.page.locator('main').evaluate(main => {
+    main.innerHTML = '<div><span>正在思考</span></div><section><div class="markdown">本轮回复已结束</div><div><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></div></section><div style="opacity:0"><button data-testid="stop-button">Stop</button></div><button aria-label="Stop">■</button>';
+  });
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  await waitFor(async () => (await records())[finished.tabId]?.status === 'idle', 'finished local page is idle');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  assert.equal((await notices()).length, 4);
+  const finishedSignals = (await records())[finished.tabId].diagnostics;
+  assert.equal(finishedSignals.finishedReply, true);
+  assert.equal(finishedSignals.thinkingControls, 0);
+  assert.equal(finishedSignals.stopControls, 0);
+  // Other pages keep reporting their actual status independently.
+  await replace(stop);
+  await stateIs('running');
+  assert.equal((await records())[finished.tabId].status, 'idle');
+  await popup.reload();
+  await popup.locator('.task.idle').waitFor();
+  await waitFor(() => popup.evaluate(() => {
+    const el = document.querySelector('.task.idle .status-dot');
+    return el && getComputedStyle(el).backgroundColor === 'rgb(239, 100, 97)';
+  }), 'idle card has red dot after reconnect rendering');
+  await waitFor(() => popup.evaluate(() => {
+    const el = document.querySelector('.task.unknown .status-dot');
+    return el && getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)';
+  }), 'unknown card has unlit dot');
+  console.log('PASS finished /local/: historical thinking + invisible/ambiguous Stop stay idle/red; other running page stays green; no old completion notification');
+  // With no connected pages, the toolbar has no lit lamp and no question overlay.
+  for (const id of taskPages.keys()) await background.evaluate(id => { delete testTabs[id]; chrome.tabs.onRemoved.emit(id); }, id);
+  await waitFor(async () => Object.keys(await records()).length === 0, 'all tabs removed');
+  await waitFor(() => background.evaluate(() => testAction.title.includes('等待打开')), 'unlit icon rendered');
+  await iconIs(-1);
+  await popup.reload();
+  await popup.getByRole('heading', { name: '等待连接', exact: true }).waitFor();
+  assert.deepEqual(await popup.locator('#signal span').evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor)), Array(3).fill('rgb(48, 59, 73)'));
+  assert.deepEqual(errors, []);
+  console.log('PASS toolbar and popup: red idle, green running, yellow attention, unknown unlit');
   console.log('Browser UI/integration harness passed. Chrome APIs were simulated; real MV3 loading and Windows notifications are separate acceptance checks.');
 } finally { await browser.close(); }
