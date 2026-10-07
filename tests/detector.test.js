@@ -239,3 +239,44 @@ test('feedback appearing in another wrapper cannot turn the same old reply into 
   assert.equal(scan(inside).completionKey, scan(inside.replace('<button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button>', '')).completionKey);
   assert.equal(scan('<div data-message-author-role="assistant"><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></div>').state, 'unknown');
 });
+test('latest finished assistant reply explicitly asking for input or review turns yellow', () => {
+  for (const text of ['请提供这两个按钮的 HTML，贴到这里。', '请你补充运行日志。', '请确认是否可以发布。', '请审阅这个修改。', 'Please paste the error log.']) {
+    const result = scan(reply.replace('结果', `<p>${text}</p>`));
+    assert.equal(result.state, 'attention', text);
+    assert.equal(result.diagnostics.attentionSource, 'reply-request');
+    assert.ok(result.attentionKey);
+  }
+  assert.equal(scan(reply.replace('结果', '<p>请提供运行日志。</p>') + '<button data-testid="stop-button">Stop</button>').state, 'running');
+});
+test('conditional advice, quotes, old asks and user messages never become text-based yellow', () => {
+  for (const text of ['如果还有问题，请提供日志。', '例如，请确认是否发布。', '你可以选择其中一种。', '任务已完成。', '<pre>请提供日志。</pre>', '<blockquote>请你补充日志。</blockquote>']) {
+    assert.equal(scan(reply.replace('结果', text)).state, 'completed', text);
+  }
+  const ask = reply.replace('结果', '<p>请提供日志。</p>');
+  assert.equal(scan(ask + reply.replace('结果', '信息已收到')).state, 'completed');
+  assert.equal(scan(ask + '<div data-message-author-role="user">请提供日志</div>').state, 'unknown');
+  assert.equal(scan('<section><div class="markdown">请提供日志。</div><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></section>', '/local/').state, 'completed');
+});
+test('an actionable question form without test IDs triggers yellow, including latest assistant cards', () => {
+  const card = '<form><fieldset><legend>请选择环境</legend><input type="radio"><button>提交回答</button></fieldset></form>';
+  for (const html of [card, `<div data-message-author-role="assistant">${card}</div>`]) {
+    const result = scan(html, '/local/');
+    assert.equal(result.state, 'attention');
+    assert.equal(result.diagnostics.attentionSource, 'input-card');
+  }
+  for (const html of [`<pre>${card}</pre>`, `<div class="markdown">${card}</div>`, card.replace('<fieldset>', '<fieldset disabled>'), card.replace('<button>', '<button disabled>'), `<div data-message-author-role="assistant">${card}</div><div data-message-author-role="assistant">已经处理</div>`]) {
+    assert.notEqual(scan(html, '/local/').state, 'attention');
+  }
+});
+test('request diagnostics and notification keys never expose question or reply text', () => {
+  const result = scan(reply.replace('结果', '<p>请提供 PRIVATE_SECRET 日志。</p>'));
+  assert.equal(result.state, 'attention');
+  assert.equal(JSON.stringify(result).includes('PRIVATE_SECRET'), false);
+});
+test('typed input widgets within the latest assistant turn are active; historical or quoted widgets are not', () => {
+  const card = '<section data-testid="request-user-input"><h2>选择环境</h2><input type="radio"><button>回答</button></section>';
+  const turn = `<div data-message-author-role="assistant">${card}</div>`;
+  assert.equal(scan(turn).state, 'attention');
+  assert.notEqual(scan(turn + '<div data-message-author-role="assistant">已解决</div>').state, 'attention');
+  assert.notEqual(scan(`<div data-message-author-role="assistant"><pre>${card}</pre></div>`).state, 'attention');
+});

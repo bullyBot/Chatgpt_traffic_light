@@ -320,6 +320,48 @@ try {
   assert.equal((await records())[historical.tabId].baseline, historicalKey);
   assert.equal((await notices()).length, 5);
   console.log('PASS old feedback returning is not a new reply and cannot notify completion');
+  const ask = await newTask('https://chatgpt.com/local/explicit-text-request', false);
+  await ask.page.locator('main').evaluate(main => {
+    main.innerHTML = '<section><div data-message-author-role="assistant"><p>请提供两个按钮的 HTML，贴到这里。</p></div><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></section>';
+  });
+  const askedAt = Date.now();
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  await waitFor(async () => (await records())[ask.tabId]?.status === 'attention', 'explicit latest reply asks for user input');
+  await waitFor(async () => (await notices()).length === 6, 'text request yellow notification');
+  assert.ok(Date.now() - askedAt < 2000);
+  assert.equal((await records())[ask.tabId].diagnostics.attentionSource, 'reply-request');
+  assert.equal((await notices())[5].requireInteraction, true);
+  await ask.page.locator('main').evaluate(main => {
+    main.innerHTML = '<section><div data-message-author-role="assistant">提问回复已经结束</div><button aria-label="Good response">赞</button><button aria-label="Bad response">踩</button></section>';
+  });
+  await new Promise(resolve => setTimeout(resolve, 3500));
+  assert.equal((await records())[ask.tabId].status, 'attention');
+  assert.equal((await notices()).length, 6);
+  await ask.page.locator('main').evaluate(main => { main.insertAdjacentHTML('beforeend', '<div data-message-author-role="user">已经提供</div>'); });
+  await waitFor(async () => (await records())[ask.tabId]?.status === 'unknown', 'user reply releases waiting');
+  await ask.page.locator('main').evaluate(main => { main.innerHTML = '<button data-testid="stop-button">Stop</button>'; });
+  await waitFor(async () => (await records())[ask.tabId]?.status === 'running', 'task resumes after answer');
+  const card = await newTask('https://chatgpt.com/local/semantic-question-card', false);
+  await card.page.locator('main').evaluate(main => {
+    main.innerHTML = '<form><fieldset><legend>选择运行环境</legend><input type="radio"><button>提交回答</button></fieldset></form>';
+  });
+  await background.evaluate(() => dispatch({ type: 'rescan' }, { id: 'test-extension' }));
+  await waitFor(async () => (await records())[card.tabId]?.status === 'attention', 'question form without test IDs');
+  await waitFor(async () => (await notices()).length === 7, 'question card notification');
+  await card.page.locator('main').evaluate(main => { main.innerHTML = ''; });
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  assert.equal((await records())[card.tabId].status, 'attention');
+  assert.equal((await notices()).length, 7);
+  await popup.reload();
+  await popup.getByRole('heading', { name: '需要你处理', exact: true }).waitFor();
+  await iconIs(1);
+  await popup.locator('summary').filter({ hasText: '连接诊断' }).click();
+  await popup.getByRole('button', { name: '生成当前页面控件诊断', exact: true }).click();
+  await waitFor(async () => (await popup.locator('#ui-structure').inputValue()).startsWith('{'), 'UI structure available without devtools');
+  const inspection = JSON.parse(await popup.locator('#ui-structure').inputValue());
+  assert.ok(inspection.buttonsTotal > 0);
+  assert.equal(JSON.stringify(inspection).includes('新的完整回复'), false);
+  console.log('PASS text and card requests: immediate yellow, stays while awaiting answer, no false completion, resumes green; popup UI inspection works');
   // With no connected pages, the toolbar has no lit lamp and no question overlay.
   for (const id of taskPages.keys()) await background.evaluate(id => { delete testTabs[id]; chrome.tabs.onRemoved.emit(id); }, id);
   await waitFor(async () => Object.keys(await records()).length === 0, 'all tabs removed');

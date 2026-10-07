@@ -131,3 +131,32 @@ test('URL identities discard query strings and reject unrelated origins', () => 
   assert.equal(canonicalUrl('https://chatgpt.com/c/one?secret=value#anchor'), 'https://chatgpt.com/c/one');
   for (const url of ['http://chatgpt.com/', 'https://evil.test/', 'https://chatgpt.com.evil.test/', 'not a url']) assert.equal(canonicalUrl(url), null);
 });
+test('yellow persists when a pending card vanishes, the composer is ready or its reply ends', () => {
+  let task = step(null, 'attention', 0, { attentionKey: 'question' }).task;
+  for (const [index, state] of ['unknown', 'idle', 'completed', 'unknown'].entries()) {
+    const result = step(task, state, 100 + index * 5000, { completionKey: 'question-reply' });
+    assert.equal(result.task.status, 'attention');
+    assert.equal(result.task.waitingForUser, true);
+    assert.deepEqual(result.events, []);
+    task = result.task;
+  }
+  assert.equal(displayedTask(task, task.lastSeen + STALE_MS + 1).status, 'unknown');
+});
+test('replying, resuming, cancellation, errors and a new document release the waiting state', () => {
+  const wait = step(null, 'attention', 0, { attentionKey: 'question' }).task;
+  const answer = step(wait, 'unknown', 100, { diagnostics: { reply: { latestRole: 'user' } } });
+  assert.equal(answer.task.status, 'unknown');
+  assert.equal(answer.task.waitingForUser, false);
+  for (const state of ['running', 'error', 'stopped']) assert.equal(step(wait, state, 200).task.waitingForUser, false);
+  assert.equal(step(wait, 'attention', 300, { cancelled: true }).task.status, 'stopped');
+  assert.equal(step(wait, 'idle', 400, { documentId: 'new-document' }).task.status, 'idle');
+});
+test('an explicit task terminal marker can finish after attention without replaying yellow', () => {
+  const wait = step(null, 'attention', 0, { attentionKey: 'question', completionKey: '' }).task;
+  const candidate = step(wait, 'completed', 100, { completionKey: 'task:done' });
+  const final = step(candidate.task, 'completed', 100 + CONFIRM_MS, { completionKey: 'task:done' });
+  assert.equal(final.task.status, 'complete');
+  assert.deepEqual(final.events, ['complete']);
+  const withOldTerminal = step(null, 'attention', 0, { attentionKey: 'question', completionKey: 'task:old' }).task;
+  assert.equal(step(withOldTerminal, 'completed', 9999, { completionKey: 'task:old' }).task.status, 'attention');
+});

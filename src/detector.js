@@ -1,3 +1,4 @@
+import { explicitReplyRequest, semanticInputRequest } from './attention.js';
 // Keep site-specific selectors here. These are conservative adapters, not an API contract.
 const UNTRUSTED = '[data-message-author-role], .markdown, .prose, [data-testid="message-content"], pre, code, blockquote, [contenteditable="true"], textarea';
 const STATUS_SELECTORS = '[data-task-status], [data-testid="task-status"], [data-testid="task-status-badge"], [data-testid="run-status"]';
@@ -75,7 +76,7 @@ function replyEvidence(doc, allowLocalFallback) {
   const latestMessage = messages.at(-1);
   const role = latestMessage?.getAttribute('data-message-author-role');
   const diagnostics = { authoredMessages: messages.length, replyBodies: outerBodies.length, latestRole: ['assistant', 'user'].includes(role) ? role : 'none', feedbackGood: feedback.filter(item => item.kind === 'good').length, feedbackBad: feedback.filter(item => item.kind === 'bad').length, bodyFound: false, scopedGood: false, scopedBad: false, scopeDepth: 0 };
-  const result = { key: '', finished: false, diagnostics };
+  const result = { key: '', finished: false, diagnostics, latestMessage, textRequest: '' };
   if (latestMessage && role !== 'assistant') return result;
   const last = latestMessage || (allowLocalFallback ? outerBodies.at(-1) : null);
   if (!last) return result;
@@ -100,6 +101,9 @@ function replyEvidence(doc, allowLocalFallback) {
   // Feedback appearing or moving must not make an old reply look like a new one.
   result.key = hash((last.getAttribute('data-message-id') || last.id || '') + ':' + text);
   result.finished = Boolean(text.trim() && diagnostics.scopedGood && diagnostics.scopedBad);
+  // Without known author metadata, prose may be a user message. Do not infer a request.
+  if (latestMessage && role === 'assistant') result.textRequest = explicitReplyRequest(body || last);
+  diagnostics.textRequest = Boolean(result.textRequest);
   return result;
 }
 
@@ -165,7 +169,10 @@ export function detect(doc, href) {
   const markerStates = markers.map(markerState);
   const terminalMarkers = markers.filter(terminalMarker);
   if (isTask && terminalMarkers.length) base.completionKey = 'task:' + hash(url.pathname + ':' + terminalMarkers.map(el => `${el.getAttribute('data-task-id') || el.id || markers.indexOf(el)}:completed`).join('|'));
-  const requests = [...main.querySelectorAll(PENDING_SELECTORS)].filter(safe);
+  const requests = [...main.querySelectorAll(PENDING_SELECTORS)].filter(el => safe(el) || (
+    visible(el) && el.closest('[data-message-author-role]') === reply.latestMessage &&
+    reply.latestMessage?.getAttribute('data-message-author-role') === 'assistant' &&
+    !el.closest('.markdown, .prose, pre, code, blockquote, [data-message-author-role="user"]')));
   const stopCandidates = [...main.querySelectorAll(`${STOP_SELECTORS}, button, [role="button"]`)].filter(el => el.matches(STOP_SELECTORS) || [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent].some(name => stopName.test(normalize(name))));
   const stops = stopCandidates.filter(el => isStopControl(el) && !(isLocal && reply.finished && !strongStop(el) && !el.closest(COMPOSER)));
   base.diagnostics.stopSamples = stopCandidates.slice(0, 8).map(el => ({
@@ -203,10 +210,13 @@ export function detect(doc, href) {
   const approval = dialogs.find(dialog => [...dialog.querySelectorAll('button')].some(button =>
     safe(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true' && approve.test(normalize(button.textContent || button.getAttribute('aria-label')))));
   const request = requests.find(el => [...el.querySelectorAll('button, input, textarea, select')].some(control => visible(control) && !control.disabled));
-  if (markerStates.includes('attention') || approval || request) {
-    const source = approval || request;
+  const inputCard = semanticInputRequest(main, reply.latestMessage, visible);
+  base.diagnostics.semanticInputCards = inputCard ? 1 : 0;
+  if (markerStates.includes('attention') || approval || request || inputCard) {
+    const source = approval || request || inputCard?.element;
+    base.diagnostics.attentionSource = approval ? 'approval-dialog' : request ? 'request-widget' : inputCard ? 'input-card' : 'task-status';
     const pendingMarker = markers.find(el => markerState(el) === 'attention');
-    const label = source?.querySelector('h1, h2, h3, [role="heading"]')?.textContent || pendingMarker?.getAttribute('data-task-status') || pendingMarker?.textContent || '待处理请求';
+    const label = inputCard?.label || source?.querySelector('h1, h2, h3, [role="heading"]')?.textContent || pendingMarker?.getAttribute('data-task-status') || pendingMarker?.textContent || '待处理请求';
     return { ...base, state: 'attention', reason: '页面正在等待批准、审阅或回答', attentionKey: hash(label + ':' + (source?.getAttribute('data-testid') || 'status')) };
   }
   if (base.diagnostics.runningSources.length) {
@@ -214,6 +224,10 @@ export function detect(doc, href) {
   }
   if (markerStates.includes('stopped')) return { ...base, state: 'stopped', reason: '页面显示任务已停止或取消' };
   if (markerStates.includes('error')) return { ...base, state: 'error', reason: '页面显示任务失败，请查看任务' };
+  if (reply.textRequest && (reply.finished || composer.readyEditors) && !terminalMarkers.length) {
+    base.diagnostics.attentionSource = 'reply-request';
+    return { ...base, state: 'attention', reason: '最新回复明确要求你提供信息、确认或审阅', attentionKey: hash('reply:' + reply.key + ':' + reply.textRequest) };
+  }
   if (isTask && terminalMarkers.length) {
     return { ...base, state: 'completed', reason: '任务状态显示已完成' };
   }

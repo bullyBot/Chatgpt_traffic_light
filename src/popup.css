@@ -44,3 +44,4 @@ details { border-top: 1px solid #273240; padding: 14px 0; color: #8f9fb3; font-s
 footer { display: flex; align-items: center; gap: 6px; background: #0d131c; color: #748399; padding: 12px 22px; font-size: 10px; }footer span:last-child { margin-left: auto; }.privacy-dot { width: 4px; height: 4px; border-radius: 50%; background: #6c9c86; }
 #diagnostics { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 10px; line-height: 1.5; }
 .icon-button:disabled { opacity: .5; cursor: wait; }
+#ui-structure { width: 100%; margin-top: 8px; background: #101720; color: #eaf0f8; border: 1px solid #526173; resize: vertical; font: 10px monospace; }

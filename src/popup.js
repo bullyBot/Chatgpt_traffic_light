@@ -48,6 +48,17 @@ async function reconnectPages() {
   finally { button.disabled = false; }
 }
 $('refresh').addEventListener('click', reconnectPages);
+$('inspect-ui').addEventListener('click', async () => {
+  const button = $('inspect-ui');
+  button.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({ type: 'inspectUI' });
+    const area = $('ui-structure');
+    area.hidden = false;
+    area.value = result?.ok ? JSON.stringify(result.structure, null, 2) : result?.reason || '页面结构读取失败';
+    area.focus(); area.select();
+  } finally { button.disabled = false; }
+});
 $('open-chat').addEventListener('click', () => chrome.tabs.create({ url: 'https://chatgpt.com/' }));
 chrome.storage.onChanged.addListener(() => refresh());
 refresh();

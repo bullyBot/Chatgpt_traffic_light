@@ -157,6 +157,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     reconnect().then(respond, () => respond({ ok: false }));
     return true;
   }
+  if (message.type === 'inspectUI') {
+    (async () => {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true, url: SITES });
+      const tab = tabs.find(tab => canonicalUrl(tab.url));
+      if (!tab) return { ok: false, reason: '请先打开要检查的 ChatGPT 页面，再点击扩展' };
+      const connected = await connectTab(chrome, tab);
+      if (!connected.ok) return connected;
+      return await chrome.tabs.sendMessage(tab.id, { type: 'inspectUI' });
+    })().then(respond, () => respond({ ok: false, reason: '页面结构读取失败，请重新连接后重试' }));
+    return true;
+  }
 });
 chrome.notifications.onClicked.addListener(id => {
   serial(async () => {

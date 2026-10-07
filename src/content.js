@@ -1,7 +1,8 @@
 import { detect, isStopControl } from './detector.js';
 import { canonicalUrl } from './model.js';
+import { uiDiagnostics } from './ui-diagnostics.js';
 
-const agentVersion = '0.2.1';
+const agentVersion = '0.2.2';
 const existing = globalThis.__chatgptTrafficLight;
 if (existing?.active && existing.version === agentVersion) {
   existing.scan();
@@ -68,6 +69,10 @@ function startObserver() {
   document.addEventListener('visibilitychange', () => report(false, true), { signal: listeners.signal });
   window.addEventListener('pageshow', () => report(false, true), { signal: listeners.signal });
   function onMessage(message, sender, respond) {
+    if (message.type === 'inspectUI') {
+      respond({ ok: true, structure: uiDiagnostics(document) });
+      return;
+    }
     if (message.type === 'scan') {
       report(false, true).then(respond);
       return true;

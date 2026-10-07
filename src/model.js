@@ -21,7 +21,7 @@ export function transition(previous, observation, now) {
     ...old, url: observation.url, documentId: observation.documentId,
     title: observation.title || 'ChatGPT 任务', lastSeen: now, diagnostics: observation.diagnostics || null,
     cycle: old?.cycle || 0, active: old?.active || false,
-    status: 'unknown', reason: observation.reason || '', candidate: null
+    status: 'unknown', reason: observation.reason || '', candidate: null, waitingForUser: false
   };
   const events = [];
   const startCycle = () => {
@@ -39,6 +39,14 @@ export function transition(previous, observation, now) {
     task.reason = '已停止；不会发送完成提醒';
     return { task, events };
   }
+  const answered = observation.diagnostics?.reply?.latestRole === 'user';
+  const terminalTask = observation.state === 'completed' && observation.completionKey?.startsWith('task:') && observation.completionKey !== old?.baseline;
+  if ((old?.waitingForUser || old?.status === 'attention') && !answered && !terminalTask && ['unknown', 'idle', 'completed'].includes(observation.state)) {
+    task.status = 'attention';
+    task.waitingForUser = true;
+    task.reason = '正在等待你处理；回复结束或输入框就绪不代表请求已解决';
+    return { task, events };
+  }
   if (observation.state === 'running') {
     if (old?.cancelled) {
       task.status = 'stopped';
@@ -52,6 +60,7 @@ export function transition(previous, observation, now) {
     if (!task.active) startCycle();
     task.cancelled = false;
     task.status = 'attention';
+    task.waitingForUser = true;
     const key = observation.attentionKey || observation.reason;
     if (task.notifiedAttention !== key) events.push('attention');
     task.attentionKey = key;
