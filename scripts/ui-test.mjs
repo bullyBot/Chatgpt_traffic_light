@@ -95,11 +95,13 @@ try {
     throw new Error(`Timed out: ${description}; ${JSON.stringify(await records())}`);
   }
   async function iconIs(lit) {
-    const lamps = await background.evaluate(() => {
+    const lamp = await background.evaluate(() => {
       const data = testAction.icon.imageData[32].data;
-      return [.19, .5, .81].map(center => Array.from(data.slice((Math.floor(32 * center) * 32 + 16) * 4, (Math.floor(32 * center) * 32 + 16) * 4 + 3)));
+      return Array.from(data.slice((16 * 32 + 16) * 4, (16 * 32 + 16) * 4 + 4));
     });
-    assert.deepEqual(lamps, [0, 1, 2].map(index => index === lit ? [[239, 100, 97], [245, 189, 79], [84, 214, 154]][index] : [56, 68, 89]));
+    const expected = lit < 0 ? [38, 50, 65] : [[239, 100, 97], [245, 189, 79], [84, 214, 154]][lit];
+    expected.forEach((channel, index) => assert.ok(Math.abs(lamp[index] - channel) <= 5, `single lens color ${lamp} vs ${expected}`));
+    assert.equal(lamp[3], 255);
   }
   const { page, tabId } = await newTask('https://chatgpt.com/c/test-run', false);
   const stateIs = status => waitFor(async () => (await records())[tabId]?.status === status, status);
@@ -159,7 +161,14 @@ try {
   await popup.locator('.task').nth(1).waitFor();
   assert.equal(await popup.locator('.task').count(), 2);
   assert.equal(await popup.locator('.task.running .status-dot').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(84, 214, 154)');
-  assert.equal(await popup.locator('#signal span:nth-child(2)').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(245, 189, 79)');
+  assert.equal(await popup.locator('#signal span').count(), 1);
+  assert.equal(await popup.locator('#signal').evaluate(el => el.getBoundingClientRect().width), 76);
+  assert.equal(await popup.locator('#signal span').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(245, 189, 79)');
+  for (const [status, color] of Object.entries({ running: 'rgb(84, 214, 154)', idle: 'rgb(239, 100, 97)', complete: 'rgb(239, 100, 97)', stopped: 'rgb(239, 100, 97)', error: 'rgb(239, 100, 97)', unknown: 'rgb(38, 50, 65)' })) {
+    await popup.locator('#signal').evaluate((el, status) => { el.className = `signal ${status}`; }, status);
+    assert.equal(await popup.locator('#signal span').evaluate(el => getComputedStyle(el).backgroundColor), color);
+  }
+  await popup.locator('#signal').evaluate(el => { el.className = 'signal attention'; });
   await mkdir('artifacts', { recursive: true });
   await popup.setViewportSize({ width: 380, height: 680 });
   await popup.screenshot({ path: 'artifacts/popup.png', fullPage: true });
@@ -369,7 +378,7 @@ try {
   await iconIs(-1);
   await popup.reload();
   await popup.getByRole('heading', { name: '等待连接', exact: true }).waitFor();
-  assert.deepEqual(await popup.locator('#signal span').evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor)), Array(3).fill('rgb(48, 59, 73)'));
+  assert.equal(await popup.locator('#signal span').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(38, 50, 65)');
   assert.deepEqual(errors, []);
   console.log('PASS toolbar and popup: red idle, green running, yellow attention, unknown unlit');
   console.log('Browser UI/integration harness passed. Chrome APIs were simulated; real MV3 loading and Windows notifications are separate acceptance checks.');

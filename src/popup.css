@@ -8,18 +8,17 @@ header { display: flex; align-items: center; gap: 11px; padding: 23px 22px 19px;
 h1, h2, h3, p { margin: 0; }
 h1 { font-size: 16px; font-weight: 650; letter-spacing: .5px; }
 header p { color: #8e9aab; font-size: 10px; margin-top: 5px; }
-.brand-mark { display: flex; gap: 3px; padding: 9px 6px; border-radius: 8px; background: #202b3a; }
-.brand-mark i { width: 6px; height: 6px; border-radius: 50%; background: #ef6461; }
-.brand-mark i:nth-child(2) { background: #f5bd4f; }.brand-mark i:nth-child(3) { background: #54d69a; }
+.brand-mark { width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; border: 2px solid #627184; background: radial-gradient(ellipse at 32% 24%, #8090a5, #283545 48%, #111923 85%); box-shadow: inset 0 0 0 2px #111923, 0 2px 5px #0005; }
 .icon-button { margin-left: auto; border: 1px solid #2c3745; border-radius: 8px; background: transparent; color: #a8b6c8; width: 30px; height: 30px; font-size: 21px; }
 .icon-button:hover { background: #263244; color: white; }
 main { padding: 20px 22px 0; }
 .overview { display: flex; align-items: center; gap: 17px; padding: 20px; border: 1px solid #2a3745; border-radius: 14px; background: linear-gradient(125deg, #202d3b, #18212d); }
-.signal { display: flex; flex-direction: column; gap: 6px; padding: 9px 8px; border-radius: 10px; background: #0e151e; border: 1px solid #354050; }
-.signal span { width: 12px; height: 12px; border-radius: 50%; background: #303b49; }
-.signal.running span:last-child { background: #54d69a; box-shadow: 0 0 12px #54d69a55; }
-.signal.attention span:nth-child(2) { background: #f5bd4f; box-shadow: 0 0 12px #f5bd4f55; }
-.signal.complete span:first-child, .signal.idle span:first-child, .signal.stopped span:first-child, .signal.error span:first-child { background: #ef6461; box-shadow: 0 0 12px #ef646155; }
+.signal { --lens: #263241; --glow: transparent; width: 76px; height: 76px; flex-shrink: 0; padding: 6px; border-radius: 50%; background: linear-gradient(135deg, #a1acb9, #3c4958 26%, #111923 56%, #677586); box-shadow: 0 5px 9px #0006, 0 0 22px var(--glow), inset 0 0 0 1px #ffffff25; }
+.signal span { position: relative; display: block; width: 100%; height: 100%; border-radius: 50%; background-color: var(--lens); background-image: radial-gradient(ellipse at 30% 20%, #ffffff65, transparent 36%), radial-gradient(circle at 45% 40%, transparent 30%, #0008 100%), repeating-radial-gradient(circle at center, #ffffff09 0 1px, transparent 1px 3px); box-shadow: inset 0 0 0 2px #0007, inset 0 -4px 8px #0006; }
+.signal span::after { content: ''; position: absolute; top: 10%; left: 17%; width: 56%; height: 20%; border-radius: 50%; background: linear-gradient(#ffffff70, #ffffff08); transform: rotate(-24deg); }
+.signal.running { --lens: #54d69a; --glow: #54d69a38; }
+.signal.attention { --lens: #f5bd4f; --glow: #f5bd4f38; }
+.signal.complete, .signal.idle, .signal.stopped, .signal.error { --lens: #ef6461; --glow: #ef646138; }
 .eyebrow { font-size: 10px; color: #94a4b8; letter-spacing: 2px; margin-bottom: 6px; }
 h2 { font-size: 22px; font-weight: 600; }
 #summary-detail { color: #9caabe; font-size: 11px; margin-top: 7px; line-height: 1.5; }

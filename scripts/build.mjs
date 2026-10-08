@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
+import { lampPixels } from '../src/lamp.js';
 await mkdir('dist/icons', { recursive: true });
 await build({ entryPoints: ['src/background.js', 'src/popup.js'], outdir: 'dist', bundle: true, format: 'esm', target: 'chrome120' });
 await build({ entryPoints: ['src/content.js'], outdir: 'dist', bundle: true, format: 'iife', target: 'chrome120' });
@@ -23,13 +24,8 @@ function chunk(type, data) {
 }
 for (const size of [16, 32, 128]) {
   const rows = Buffer.alloc((size * 4 + 1) * size);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    let rgba = x >= size * .23 && x <= size * .77 ? [23, 34, 52, 255] : [0, 0, 0, 0];
-    [.19, .5, .81].forEach((center, i) => {
-      if (Math.hypot(x + .5 - size / 2, y + .5 - size * center) < size * .12) rgba = [[239, 100, 97, 255], [245, 189, 79, 255], [84, 214, 154, 255]][i];
-    });
-    rows.set(rgba, y * (size * 4 + 1) + 1 + x * 4);
-  }
+  const pixels = lampPixels('unknown', size);
+  for (let y = 0; y < size; y++) rows.set(pixels.subarray(y * size * 4, (y + 1) * size * 4), y * (size * 4 + 1) + 1);
   const header = Buffer.alloc(13); header.writeUInt32BE(size, 0); header.writeUInt32BE(size, 4); header[8] = 8; header[9] = 6;
   await writeFile(`dist/icons/${size}.png`, Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]));
 }

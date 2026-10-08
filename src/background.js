@@ -1,7 +1,7 @@
 import { aggregate, canonicalUrl, displayedTask, LABELS, transition } from './model.js';
 import { connectTab, SITES } from './connection.js';
+import { COLORS, lampPixels } from './lamp.js';
 
-const COLORS = { running: '#54d69a', attention: '#f5bd4f', complete: '#ef6461', idle: '#ef6461', stopped: '#ef6461', error: '#ef6461' };
 let queue = Promise.resolve();
 function serial(work) {
   const next = queue.then(work);
@@ -13,16 +13,7 @@ async function read() {
   return { records, notices, notificationError };
 }
 function icon(status, size) {
-  const canvas = new OffscreenCanvas(size, size);
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#172234';
-  ctx.beginPath(); ctx.roundRect(size * .24, 0, size * .52, size, size * .16); ctx.fill();
-  ['red', 'yellow', 'green'].forEach((lamp, index) => {
-    const selected = lamp === (status === 'running' ? 'green' : status === 'attention' ? 'yellow' : COLORS[status] ? 'red' : null);
-    ctx.beginPath(); ctx.arc(size / 2, size * (.19 + .31 * index), size * .125, 0, Math.PI * 2);
-    ctx.fillStyle = selected ? COLORS[status] : '#384459'; ctx.fill();
-  });
-  return ctx.getImageData(0, 0, size, size);
+  return new ImageData(lampPixels(status, size), size, size);
 }
 async function render(records) {
   const tasks = Object.values(records).map(task => displayedTask(task, Date.now()));
