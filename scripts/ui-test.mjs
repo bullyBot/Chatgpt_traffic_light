@@ -3,6 +3,7 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
+import { readUsageInPage } from '../src/usage.js';
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true });
 const context = await browser.newContext();
@@ -10,6 +11,11 @@ const errors = [];
 context.on('weberror', error => errors.push(error.error().message));
 const background = await context.newPage();
 const taskPages = new Map();
+await background.exposeFunction('__readUsageInTab', async id => {
+  const page = taskPages.get(id);
+  if (!page) throw new Error('Cannot access tab');
+  return [{ result: await page.evaluate(readUsageInPage) }];
+});
 await background.exposeFunction('__sendToTab', async (id, message) => {
   const page = taskPages.get(id);
   if (!page) throw new Error('Receiving end does not exist');
@@ -60,7 +66,7 @@ try {
         update: async (id, options) => { testOpen.push({ id, ...options }); },
         create: async options => { testOpen.push(options); }, sendMessage: async (id, message) => __sendToTab(id, message)
       },
-      scripting: { executeScript: async ({ target }) => __injectToTab(target.tabId) },
+      scripting: { executeScript: async ({ target, func }) => func ? __readUsageInTab(target.tabId) : __injectToTab(target.tabId) },
       windows: { update: async () => {} },
       alarms: { create: async () => {}, onAlarm: event() }
     };
@@ -72,6 +78,10 @@ try {
   await background.addScriptTag({ path: 'dist/background.js', type: 'module' });
   const shell = '<!doctype html><html><head><meta charset="utf-8"><title>演示任务 · ChatGPT</title></head><body><main><div id="prompt-textarea" contenteditable="true"></div></main></body></html>';
   await context.route('https://chatgpt.com/**', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: shell }));
+  let usageStatus = 200;
+  const resetAt = Math.floor(Date.now() / 1000) + 3600;
+  await context.route('https://chatgpt.com/api/auth/session', route => route.fulfill({ json: { accessToken: 'synthetic-test-token' } }));
+  await context.route('https://chatgpt.com/backend-api/wham/usage', route => route.fulfill({ status: usageStatus, json: { rate_limit: { primary_window: { used_percent: 27, limit_window_seconds: 18000, reset_at: resetAt } } } }));
   let nextId = 1;
   async function newTask(url, inject = true) {
     const page = await context.newPage();
@@ -153,11 +163,28 @@ try {
     return route.fulfill({ contentType: file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html', body: await readFile(`dist/${file}`) });
   });
   await popup.exposeFunction('__sendToExtension', message => background.evaluate(message => dispatch(message, { id: 'test-extension' }), message));
+  await popup.exposeFunction('__createTab', options => background.evaluate(options => chrome.tabs.create(options), options));
   await popup.addInitScript(() => {
-    globalThis.chrome = { runtime: { sendMessage: message => __sendToExtension(message) }, storage: { onChanged: { addListener() {} } }, tabs: { create: async () => {} } };
+    globalThis.chrome = { runtime: { sendMessage: message => __sendToExtension(message) }, storage: { onChanged: { addListener() {} } }, tabs: { create: options => __createTab(options) } };
   });
   await popup.goto('https://extension.test/popup.html');
   await popup.getByRole('heading', { name: '需要你处理', exact: true }).waitFor();
+  await waitFor(async () => (await popup.locator('#usage-percent').textContent()) === '73%', 'official 5h remaining quota');
+  assert.equal(await popup.locator('#usage-meter').getAttribute('max'), '100');
+  assert.equal(await popup.locator('#usage-meter').evaluate(el => el.value), 73);
+  assert.match(await popup.locator('#usage-reset').textContent(), /重置时间/);
+  await popup.getByRole('button', { name: '查看官方用量 ↗', exact: true }).click();
+  await waitFor(async () => (await background.evaluate(() => testOpen)).some(item => item.url === 'https://chatgpt.com/codex/settings/usage'), 'official usage link');
+  usageStatus = 401;
+  await popup.getByRole('button', { name: '刷新额度', exact: true }).click();
+  await waitFor(async () => (await popup.locator('#usage-reset').textContent()).includes('登录已失效'), 'quota authentication error');
+  assert.equal(await popup.locator('#usage-percent').textContent(), '—');
+  assert.equal(await popup.locator('#usage-meter').isVisible(), false);
+  assert.equal(await popup.locator('#signal').getAttribute('class'), 'signal attention');
+  usageStatus = 200;
+  await popup.getByRole('button', { name: '刷新额度', exact: true }).click();
+  await waitFor(async () => (await popup.locator('#usage-percent').textContent()) === '73%', 'quota refresh recovery');
+  console.log('PASS official quota UI: remaining percent/reset, manual refresh, auth failure hides old quota, task lamp unchanged');
   await popup.locator('.task').nth(1).waitFor();
   assert.equal(await popup.locator('.task').count(), 2);
   assert.equal(await popup.locator('.task.running .status-dot').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(84, 214, 154)');
@@ -217,8 +244,8 @@ try {
   await stateIs('idle');
   assert.equal((await notices()).length, 2);
   await background.evaluate(() => chrome.notifications.onClicked.emit(testNotifications[0].id));
-  await waitFor(() => background.evaluate(() => testOpen.length > 0), 'notification click');
-  assert.equal(await background.evaluate(() => testOpen[0].id), tabId);
+  await waitFor(() => background.evaluate(id => testOpen.some(item => item.id === id && item.active), tabId), 'notification click');
+  assert.equal(await background.evaluate(() => testOpen.find(item => item.active).id), tabId);
   await second.page.close();
   await background.evaluate(id => { delete testTabs[id]; chrome.tabs.onRemoved.emit(id); }, second.tabId);
   await waitFor(async () => !(await records())[second.tabId], 'closed tab cleanup');

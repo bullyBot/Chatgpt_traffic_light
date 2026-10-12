@@ -6,7 +6,11 @@
 
 需要 Chrome 120 或更新版本。
 
-仓库内提供已构建的安装包：[chatgpt-traffic-light-v0.2.3.zip](releases/chatgpt-traffic-light-v0.2.3.zip)。在 GitHub 中打开该文件，点击「Download raw file」下载；也可以下载整个分支的 ZIP，解压后在 `releases/` 文件夹中找到它。更新源码后应重新构建安装包。
+仓库内提供已构建的安装包：[chatgpt-traffic-light-v0.3.0.zip](releases/chatgpt-traffic-light-v0.3.0.zip)。在 GitHub 中打开该文件，点击「Download raw file」下载；也可以下载整个分支的 ZIP，解压后在 `releases/` 文件夹中找到它。更新源码后应重新构建安装包。
+
+**v0.3.0 官方 5 小时额度**：点击扩展后，弹窗读取当前登录账号的默认 Codex 额度，显示剩余百分比、进度条、重置时间和更新时间，支持手动「刷新额度」及打开官方用量页。需要至少一个已打开、已登录且未休眠的 `chatgpt.com` 标签页；优先从当前窗口的活动 ChatGPT 标签读取。不添加权限、不在后台轮询，也不保存登录令牌或用量；令牌仅在页面隔离环境中用于同源官方请求。读取失败、账号无 5 小时窗口、数据超过 5 分钟或到达重置时间时隐藏百分比，不能据此推断额度已恢复。多工作区用户请对照官方用量页的账号／工作区；此版本不选择工作区。限额显示不改变任务灯色和通知。
+
+数据请求参考 OpenAI Codex 客户端的 [用量接口](https://github.com/openai/codex/blob/main/codex-rs/backend-client/src/client/rate_limit_resets.rs) 和 [窗口字段](https://github.com/openai/codex/blob/main/codex-rs/backend-client/src/client.rs)：`GET /backend-api/wham/usage`，仅使用 `limit_window_seconds = 18000` 的窗口、`used_percent` 和 `reset_at`。这是网页内部接口，服务变化可能导致读取失败；已用受控响应验证，真实登录账号仍需安装后核对。
 
 **v0.2.3 单灯样式**：工具栏与弹窗改用一个放大的圆灯，带玻璃反光和金属边框。绿色进行、黄色待处理、红色停止／完成／空闲，未识别时熄灭；状态检测、通知与黄灯保持逻辑不变。
 

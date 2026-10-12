@@ -1,7 +1,31 @@
 import { LABELS } from './model.js';
+import { usageView } from './usage.js';
 const $ = id => document.getElementById(id);
 const order = ['attention', 'running', 'error', 'unknown', 'stopped', 'complete', 'idle'];
 let lastRender = '';
+let usage;
+function renderUsage() {
+  const view = usageView(usage);
+  $('usage-percent').textContent = view.available ? `${Number(view.percent.toFixed(1))}%` : '—';
+  $('usage-meter').hidden = !view.available;
+  $('usage-meter').value = view.available ? view.percent : 0;
+  $('usage-label').textContent = view.available ? '剩余额度' : '尚未确认额度';
+  const time = value => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  $('usage-reset').textContent = view.available ? `重置时间：${time(view.resetAt)}` : view.detail;
+  $('usage-updated').textContent = view.available ? `更新于 ${time(view.fetchedAt)} · 当前登录账号的默认额度` : '以官方用量页为准';
+}
+async function refreshUsage() {
+  const button = $('refresh-usage');
+  if (button.disabled) return;
+  button.disabled = true;
+  usage = null;
+  renderUsage();
+  try { usage = await chrome.runtime.sendMessage({ type: 'getUsage' }); }
+  catch { usage = { ok: false, reason: '官方用量读取失败，请重试' }; }
+  finally { button.disabled = false; renderUsage(); }
+}
+$('refresh-usage').addEventListener('click', refreshUsage);
+$('open-usage').addEventListener('click', () => chrome.tabs.create({ url: 'https://chatgpt.com/codex/settings/usage' }));
 function element(tag, className, text) {
   const node = document.createElement(tag); node.className = className; node.textContent = text; return node;
 }
@@ -63,4 +87,6 @@ $('open-chat').addEventListener('click', () => chrome.tabs.create({ url: 'https:
 chrome.storage.onChanged.addListener(() => refresh());
 refresh();
 reconnectPages();
+refreshUsage();
 setInterval(refresh, 5000);
+setInterval(renderUsage, 1000);

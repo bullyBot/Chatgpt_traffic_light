@@ -2,7 +2,7 @@ import { detect, isStopControl } from './detector.js';
 import { canonicalUrl } from './model.js';
 import { uiDiagnostics } from './ui-diagnostics.js';
 
-const agentVersion = '0.2.3';
+const agentVersion = '0.3.0';
 const existing = globalThis.__chatgptTrafficLight;
 if (existing?.active && existing.version === agentVersion) {
   existing.scan();

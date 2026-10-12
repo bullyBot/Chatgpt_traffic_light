@@ -1,6 +1,9 @@
 import { aggregate, canonicalUrl, displayedTask, LABELS, transition } from './model.js';
 import { connectTab, SITES } from './connection.js';
 import { COLORS, lampPixels } from './lamp.js';
+import { loadUsage } from './usage.js';
+
+let usageRequest;
 
 let queue = Promise.resolve();
 function serial(work) {
@@ -123,6 +126,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return true;
   }
   if (sender.id !== chrome.runtime.id || sender.tab) return;
+  if (message.type === 'getUsage') {
+    usageRequest ||= loadUsage(chrome).finally(() => { usageRequest = null; });
+    usageRequest.then(respond, () => respond({ ok: false, reason: '官方用量读取失败，请重试' }));
+    return true;
+  }
   if (message.type === 'getState') {
     serial(async () => {
       const data = await read();
